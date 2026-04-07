@@ -1,4 +1,4 @@
-#import "ocr.h"
+#import "main.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 
@@ -252,6 +252,36 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
     return [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
 }
 
+// ── format helpers ────────────────────────────────────────────────────────────
+
+static NSBitmapImageFileType bitmapTypeForFormat(NSString *fmt) {
+    NSDictionary<NSString *, NSNumber *> *map = @{
+        @"png":  @(NSBitmapImageFileTypePNG),
+        @"jpg":  @(NSBitmapImageFileTypeJPEG),
+        @"jpeg": @(NSBitmapImageFileTypeJPEG),
+        @"tiff": @(NSBitmapImageFileTypeTIFF),
+        @"tif":  @(NSBitmapImageFileTypeTIFF),
+        @"bmp":  @(NSBitmapImageFileTypeBMP),
+        @"gif":  @(NSBitmapImageFileTypeGIF),
+    };
+    NSNumber *type = map[[fmt lowercaseString]];
+    return type ? (NSBitmapImageFileType)[type unsignedIntegerValue] : NSBitmapImageFileTypePNG;
+}
+
+// Canonical file extension for each format (jpeg→jpg, tif→tiff, etc.)
+static NSString *extensionForFormat(NSString *fmt) {
+    NSDictionary<NSString *, NSString *> *map = @{
+        @"png":  @"png",
+        @"jpg":  @"jpg",
+        @"jpeg": @"jpg",
+        @"tiff": @"tiff",
+        @"tif":  @"tiff",
+        @"bmp":  @"bmp",
+        @"gif":  @"gif",
+    };
+    return map[[fmt lowercaseString]] ?: @"png";
+}
+
 // ── debug image ───────────────────────────────────────────────────────────────
 
 - (BOOL)drawDebugImage:(NSString *)imagePath jsonResult:(NSString *)jsonResult error:(NSError **)error {
@@ -312,21 +342,29 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
 
     [newImage unlockFocus];
 
-    NSString *outputFileName = [[imagePath stringByDeletingPathExtension]
-                                stringByAppendingString:@"_boxes.png"];
+    NSString *fmt = self.boxesFormat.length ? self.boxesFormat : @"png";
+    NSBitmapImageFileType bitmapType = bitmapTypeForFormat(fmt);
+    NSString *ext = extensionForFormat(fmt);
+    NSDictionary *props = (bitmapType == NSBitmapImageFileTypeJPEG)
+        ? @{NSImageCompressionFactor: @(0.85)}
+        : @{};
+
+    NSString *outputFileName = [[[imagePath stringByDeletingPathExtension]
+                                 stringByAppendingString:@"_boxes"]
+                                stringByAppendingPathExtension:ext];
     NSData *tiff = [newImage TIFFRepresentation];
     NSBitmapImageRep *bitmap = [NSBitmapImageRep imageRepWithData:tiff];
-    NSData *pngData = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-    if (!pngData) {
+    NSData *imgData = [bitmap representationUsingType:bitmapType properties:props];
+    if (!imgData) {
         if (error) {
             *error = [NSError errorWithDomain:OCRErrorDomain
                                          code:OCRErrorImageConversionFailed
                                      userInfo:@{NSLocalizedDescriptionKey:
-                                                    [NSString stringWithFormat:@"Failed to encode PNG: %@", outputFileName]}];
+                                                    [NSString stringWithFormat:@"Failed to encode %@: %@", ext, outputFileName]}];
         }
         return NO;
     }
-    if (![pngData writeToFile:outputFileName options:NSDataWritingAtomic error:error]) return NO;
+    if (![imgData writeToFile:outputFileName options:NSDataWritingAtomic error:error]) return NO;
     printf("Debug image saved to: %s\n", outputFileName.UTF8String);
     return YES;
 }

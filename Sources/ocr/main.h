@@ -12,6 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL lang;
 @property (nonatomic, assign) BOOL merge;
 @property (nonatomic, copy, nullable) NSString *recLangs;
+@property (nonatomic, copy) NSString *boxesFormat; // png | jpg | tiff | bmp | gif  (default: png)
 
 - (BOOL)runWithError:(NSError **)error;
 

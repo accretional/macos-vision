@@ -9,4 +9,4 @@ playground
 .build
 .vscode
 Package.resolved
-tests/
+tests/tmp/
