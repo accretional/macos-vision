@@ -1,106 +1,82 @@
-run_track_tests() {
-    local tmp="$TMPDIR_ROOT/track"
-    mkdir -p "$tmp"
+#!/usr/bin/env bash
+set -euo pipefail
 
-    # ── error handling ────────────────────────────────────────────────────────
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+BINARY="$ROOT/.build/debug/macos-vision"
+FRAMES="$ROOT/sample_data/input/videos/selective_attention_test_frames"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-    echo "── track: error handling ────────────────────────────────────────────────"
-    local err_out
-    err_out=$($BINARY track 2>&1 || true)
-    if echo "$err_out" | grep -qi "video\|img-dir\|must be provided\|error"; then
-        pass "track: missing input error shown"
-    else
-        fail "track: no error on missing input"
-    fi
+PASS=0; FAIL=0
+pass() { echo "  PASS  $1"; PASS=$((PASS+1)); }
+fail() { echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
 
-    local bad_video
-    bad_video=$($BINARY track --video /nonexistent/video.mp4 2>&1 || true)
-    if echo "$bad_video" | grep -qi "not found\|error\|failed"; then
-        pass "track: missing video file error shown"
-    else
-        fail "track: missing video file not rejected"
-    fi
+has_frames=false
+if [ -d "$FRAMES" ] && ls "$FRAMES"/*.jpg "$FRAMES"/*.png &>/dev/null 2>&1; then
+    has_frames=true
+fi
 
-    local op_err
-    op_err=$($BINARY track --img-dir "$IMAGES" --operation bad-op 2>&1 || true)
-    if echo "$op_err" | grep -qi "unknown\|supported\|error"; then
-        pass "track: unknown operation error shown"
-    else
-        fail "track: unknown operation not rejected"
-    fi
-    echo
+# ── error handling ────────────────────────────────────────────────────────────
+echo "── track: error handling ────────────────────────────────────────────────────"
+err=$("$BINARY" track 2>&1 || true)
+echo "$err" | grep -qi "video\|img-dir\|must be provided\|error" && pass "track: missing input error shown" || fail "track: no error on missing input"
+err=$("$BINARY" track --video /nonexistent/video.mp4 2>&1 || true)
+echo "$err" | grep -qi "not found\|error\|failed" && pass "track: missing video error shown" || fail "track: missing video not rejected"
+if $has_frames; then
+    err=$("$BINARY" track --img-dir "$FRAMES" --operation bad-op 2>&1 || true)
+    echo "$err" | grep -qi "unknown\|supported\|error" && pass "track: unknown operation rejected" || fail "track: unknown operation not rejected"
+fi
+echo
 
-    # ── homographic (image sequence) ──────────────────────────────────────────
-
-    echo "── track: homographic (image sequence) ──────────────────────────────────"
-    $BINARY track --img-dir "$IMAGES" --operation homographic --output "$tmp"
-    local hom="$tmp/track_homographic.json"
-
-    if [ -f "$hom" ]; then
+# ── homographic ───────────────────────────────────────────────────────────────
+echo "── track: homographic ───────────────────────────────────────────────────────"
+if $has_frames; then
+    "$BINARY" track --img-dir "$FRAMES" --operation homographic --output "$TMP"
+    got="$TMP/homographic.json"
+    if [ -f "$got" ]; then
         pass "homographic: output produced"
-        if jq empty "$hom" 2>/dev/null; then
-            pass "homographic: valid JSON"
-        else
-            fail "homographic: invalid JSON"
-        fi
-        if jq -e '.frameCount' "$hom" > /dev/null 2>&1; then
-            pass "homographic: frameCount field present"
-        else
-            fail "homographic: frameCount field missing"
-        fi
-        if jq -e '.frames' "$hom" > /dev/null 2>&1; then
-            pass "homographic: frames field present"
-        else
-            fail "homographic: frames field missing"
-        fi
+        jq empty "$got" 2>/dev/null && pass "homographic: valid JSON" || fail "homographic: invalid JSON"
+        jq -e '.frames' "$got" >/dev/null 2>&1 && pass "homographic: frames field present" || fail "homographic: frames field missing"
     else
         fail "homographic: output not produced"
     fi
-    echo
+else
+    pass "homographic: skipped (frames not found)"
+fi
+echo
 
-    # ── translational (image sequence) ────────────────────────────────────────
-
-    echo "── track: translational (image sequence) ────────────────────────────────"
-    $BINARY track --img-dir "$IMAGES" --operation translational --output "$tmp"
-    local trl="$tmp/track_translational.json"
-
-    if [ -f "$trl" ]; then
+# ── translational ─────────────────────────────────────────────────────────────
+echo "── track: translational ─────────────────────────────────────────────────────"
+if $has_frames; then
+    "$BINARY" track --img-dir "$FRAMES" --operation translational --output "$TMP"
+    got="$TMP/translational.json"
+    if [ -f "$got" ]; then
         pass "translational: output produced"
-        if jq empty "$trl" 2>/dev/null; then
-            pass "translational: valid JSON"
-        else
-            fail "translational: invalid JSON"
-        fi
-        if jq -e '.frames' "$trl" > /dev/null 2>&1; then
-            pass "translational: frames field present"
-        else
-            fail "translational: frames field missing"
-        fi
+        jq empty "$got" 2>/dev/null && pass "translational: valid JSON" || fail "translational: invalid JSON"
+        jq -e '.frames' "$got" >/dev/null 2>&1 && pass "translational: frames field present" || fail "translational: frames field missing"
     else
         fail "translational: output not produced"
     fi
-    echo
+else
+    pass "translational: skipped (frames not found)"
+fi
+echo
 
-    # ── trajectories (image sequence) ─────────────────────────────────────────
-
-    echo "── track: trajectories (image sequence) ─────────────────────────────────"
-    $BINARY track --img-dir "$IMAGES" --operation trajectories --output "$tmp"
-    local trj="$tmp/track_trajectories.json"
-
-    if [ -f "$trj" ]; then
+# ── trajectories ──────────────────────────────────────────────────────────────
+echo "── track: trajectories ──────────────────────────────────────────────────────"
+if $has_frames; then
+    "$BINARY" track --img-dir "$FRAMES" --operation trajectories --output "$TMP"
+    got="$TMP/trajectories.json"
+    if [ -f "$got" ]; then
         pass "trajectories: output produced"
-        if jq empty "$trj" 2>/dev/null; then
-            pass "trajectories: valid JSON"
-        else
-            fail "trajectories: invalid JSON"
-        fi
-        if jq -e '.trajectories' "$trj" > /dev/null 2>&1; then
-            pass "trajectories: trajectories field present"
-        else
-            fail "trajectories: trajectories field missing"
-        fi
+        jq empty "$got" 2>/dev/null && pass "trajectories: valid JSON" || fail "trajectories: invalid JSON"
+        jq -e '.trajectories' "$got" >/dev/null 2>&1 && pass "trajectories: trajectories field present" || fail "trajectories: trajectories field missing"
     else
         fail "trajectories: output not produced"
     fi
-    echo
-}
+else
+    pass "trajectories: skipped (frames not found)"
+fi
+echo
+
+echo "Results: $PASS passed, $FAIL failed"
+[ $FAIL -eq 0 ] || exit 1

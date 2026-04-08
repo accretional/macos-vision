@@ -410,6 +410,7 @@ static NSString *pointsString(NSArray<NSValue *> *points, CGFloat w, CGFloat h) 
     if ([op isEqualToString:@"horizon"])          return [self shapesForHorizon:json         palette:palette];
     if ([op isEqualToString:@"trajectories"])     return [self shapesForTrajectories:json    palette:palette];
     if ([op isEqualToString:@"aesthetics"])       return [self shapesForAesthetics:json      palette:palette];
+    if ([op isEqualToString:@"ocr"])              return [self shapesForOCR:json             palette:palette];
 
     // Operations with no visual overlay (feature-print, contours metadata, flow maps)
     return @[];
@@ -766,6 +767,42 @@ static NSString *pointsString(NSArray<NSValue *> *points, CGFloat w, CGFloat h) 
                                                  text:scoreStr
                                                 color:palette.labelColor
                                              fontSize:palette.labelFontSize]];
+    return shapes;
+}
+
+// ── ocr ───────────────────────────────────────────────────────────────────────
+
++ (NSArray<SVGShape *> *)shapesForOCR:(NSDictionary *)json palette:(SVGPalette *)palette {
+    NSMutableArray<SVGShape *> *shapes = [NSMutableArray array];
+    for (NSDictionary *obs in json[@"observations"]) {
+        NSDictionary *quad = obs[@"quad"];
+        if (![quad isKindOfClass:[NSDictionary class]]) continue;
+
+        NSDictionary *tl = quad[@"topLeft"];
+        NSDictionary *tr = quad[@"topRight"];
+        NSDictionary *br = quad[@"bottomRight"];
+        NSDictionary *bl = quad[@"bottomLeft"];
+        if (!tl || !tr || !br || !bl) continue;
+
+        NSArray<NSValue *> *pts = @[
+            [NSValue valueWithPoint:NSMakePoint([tl[@"x"] doubleValue], [tl[@"y"] doubleValue])],
+            [NSValue valueWithPoint:NSMakePoint([tr[@"x"] doubleValue], [tr[@"y"] doubleValue])],
+            [NSValue valueWithPoint:NSMakePoint([br[@"x"] doubleValue], [br[@"y"] doubleValue])],
+            [NSValue valueWithPoint:NSMakePoint([bl[@"x"] doubleValue], [bl[@"y"] doubleValue])],
+        ];
+        SVGPolygonShape *box = [SVGPolygonShape shapeWithPoints:pts style:palette.objectBox];
+        [shapes addObject:box];
+
+        if (palette.showLabels) {
+            NSString *text = obs[@"text"];
+            if ([text isKindOfClass:[NSString class]] && text.length > 0) {
+                [shapes addObject:[SVGTextShape shapeWithPosition:CGPointMake([tl[@"x"] doubleValue], [tl[@"y"] doubleValue] - 0.01)
+                                                             text:text
+                                                            color:palette.labelColor
+                                                         fontSize:palette.smallLabelFontSize]];
+            }
+        }
+    }
     return shapes;
 }
 

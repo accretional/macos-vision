@@ -9,4 +9,5 @@ playground
 .build
 .vscode
 Package.resolved
-tests/tmp/
+sample_data/output/
+temp*/

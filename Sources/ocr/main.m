@@ -240,6 +240,7 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
     };
 
     NSDictionary *result = @{
+        @"operation":    @"ocr",
         @"info":         info,
         @"observations": positionalJson,
         @"texts":        [fullText componentsJoinedByString:@"\n"],
