@@ -1,0 +1,542 @@
+{
+  "operation" : "contours",
+  "contourCount" : 193,
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/gorilla.jpg",
+    "filename" : "gorilla.jpg",
+    "width" : 640,
+    "height" : 480
+  },
+  "topContours" : [
+    {
+      "childCount" : 0,
+      "pointCount" : 32,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 19,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 52,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 5,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 20,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 182,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 8,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 14,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 19,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 103,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 13,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 18,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 16,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 1,
+      "pointCount" : 254,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 12,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 21,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 8,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 12,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 39,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 10,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 12,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 7,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 12,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 15,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 7,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 6,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 50,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 15,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 12,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 22,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 6,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 16,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 11,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 7,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 5,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 5,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 17,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 8,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 7,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 17,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 71,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 5,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 7,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 6,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 26,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 7,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 79,
+      "pointCount" : 6527,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 11,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 18,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 23,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 33,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 6,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 35,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 8,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 5,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 20,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 8,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 29,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 10,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 23,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 3,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 8,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 14,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 0,
+      "pointCount" : 4,
+      "aspectRatio" : 1.3333333730697632
+    },
+    {
+      "childCount" : 2,
+      "pointCount" : 181,
+      "aspectRatio" : 1.3333333730697632
+    }
+  ]
+}

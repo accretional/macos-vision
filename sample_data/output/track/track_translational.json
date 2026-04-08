@@ -1,0 +1,390 @@
+{
+  "frames" : [
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 1
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 2
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 3
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 4
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 5
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 6
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 1,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 7
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 8
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 9
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 10
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 11
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 12
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 17,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 13
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 20,
+        "c" : 0,
+        "tx" : 29,
+        "a" : 1
+      },
+      "frameIndex" : 14
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 3,
+        "c" : 0,
+        "tx" : 2,
+        "a" : 1
+      },
+      "frameIndex" : 15
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : 10,
+        "a" : 1
+      },
+      "frameIndex" : 16
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : 2,
+        "a" : 1
+      },
+      "frameIndex" : 17
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -10,
+        "a" : 1
+      },
+      "frameIndex" : 18
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -68,
+        "a" : 1
+      },
+      "frameIndex" : 19
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : -1,
+        "c" : 0,
+        "tx" : -44,
+        "a" : 1
+      },
+      "frameIndex" : 20
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : -3,
+        "c" : 0,
+        "tx" : -21,
+        "a" : 1
+      },
+      "frameIndex" : 21
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -4,
+        "a" : 1
+      },
+      "frameIndex" : 22
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : 2,
+        "a" : 1
+      },
+      "frameIndex" : 23
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : 3,
+        "a" : 1
+      },
+      "frameIndex" : 24
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : 3,
+        "a" : 1
+      },
+      "frameIndex" : 25
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 26
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -2,
+        "a" : 1
+      },
+      "frameIndex" : 27
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -4,
+        "a" : 1
+      },
+      "frameIndex" : 28
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -12,
+        "a" : 1
+      },
+      "frameIndex" : 29
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 7,
+        "c" : 0,
+        "tx" : 2,
+        "a" : 1
+      },
+      "frameIndex" : 30
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 2,
+        "c" : 0,
+        "tx" : -26,
+        "a" : 1
+      },
+      "frameIndex" : 31
+    },
+    {
+      "confidence" : 1,
+      "alignmentTransform" : {
+        "d" : 1,
+        "b" : 0,
+        "ty" : 0,
+        "c" : 0,
+        "tx" : -0,
+        "a" : 1
+      },
+      "frameIndex" : 32
+    }
+  ],
+  "operation" : "translational",
+  "frameCount" : 33
+}

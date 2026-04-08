@@ -1,0 +1,21 @@
+{
+  "horizon" : {
+    "angle" : 0.080721475183963776,
+    "angleDegrees" : 4.6249998441111346,
+    "transform" : {
+      "d" : 0.99674379040827743,
+      "b" : 0.080633840802357096,
+      "ty" : -20.987247210836422,
+      "c" : -0.080633840802357096,
+      "a" : 0.99674379040827743,
+      "tx" : 22.290717532382626
+    }
+  },
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/sad_pablo.png",
+    "filename" : "sad_pablo.png",
+    "width" : 542,
+    "height" : 531
+  },
+  "operation" : "horizon"
+}

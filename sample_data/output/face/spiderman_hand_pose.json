@@ -1,0 +1,12 @@
+{
+  "hands" : [
+
+  ],
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/spiderman.jpg",
+    "filename" : "spiderman.jpg",
+    "width" : 564,
+    "height" : 423
+  },
+  "operation" : "hand-pose"
+}

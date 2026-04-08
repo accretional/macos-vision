@@ -1,0 +1,144 @@
+{
+  "operation" : "ocr",
+  "texts" : "The Llama 3.2-Vision collection of multimodal large language models (LLMS) is a\ncollection of instruction-tuned image reasoning generative models in lIB and 908\nsizes (text + images in \/ text out). The Llama 3.2- Vision instruction-tuned models\nare optimized for visual recognition, image reasoning, captioning, and answering\ngeneral questions about an image. The models outperform many of the available\nopen source and closed multimodal models on common industry benchmarks.",
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/handwriting.png",
+    "filename" : "handwriting.png",
+    "width" : 1600,
+    "height" : 720
+  },
+  "observations" : [
+    {
+      "quad" : {
+        "bottomRight" : {
+          "x" : 0.87936045567237608,
+          "y" : 0.35161290245962207
+        },
+        "topRight" : {
+          "x" : 0.87936045567237608,
+          "y" : 0.28333333410533335
+        },
+        "topLeft" : {
+          "x" : 0.090116299788587137,
+          "y" : 0.28333333410533335
+        },
+        "bottomLeft" : {
+          "x" : 0.090116299788587137,
+          "y" : 0.35161290245962207
+        }
+      },
+      "text" : "The Llama 3.2-Vision collection of multimodal large language models (LLMS) is a",
+      "confidence" : 1
+    },
+    {
+      "quad" : {
+        "bottomRight" : {
+          "x" : 0.88372092899964794,
+          "y" : 0.43225806298465586
+        },
+        "topRight" : {
+          "x" : 0.88372092899964794,
+          "y" : 0.36774193719967596
+        },
+        "topLeft" : {
+          "x" : 0.090116268965468371,
+          "y" : 0.36774193719967596
+        },
+        "bottomLeft" : {
+          "x" : 0.090116268965468371,
+          "y" : 0.43225806298465586
+        }
+      },
+      "text" : "collection of instruction-tuned image reasoning generative models in lIB and 908",
+      "confidence" : 1
+    },
+    {
+      "quad" : {
+        "bottomRight" : {
+          "x" : 0.90988372478814117,
+          "y" : 0.51290322464364202
+        },
+        "topRight" : {
+          "x" : 0.90988372478814117,
+          "y" : 0.44838709885866213
+        },
+        "topLeft" : {
+          "x" : 0.090116268733453631,
+          "y" : 0.44838709885866213
+        },
+        "bottomLeft" : {
+          "x" : 0.090116268733453631,
+          "y" : 0.51290322464364202
+        }
+      },
+      "text" : "sizes (text + images in \/ text out). The Llama 3.2- Vision instruction-tuned models",
+      "confidence" : 1
+    },
+    {
+      "quad" : {
+        "bottomRight" : {
+          "x" : 0.87790696476596564,
+          "y" : 0.59722222350792897
+        },
+        "topRight" : {
+          "x" : 0.87790696476596564,
+          "y" : 0.52903225815385724
+        },
+        "topLeft" : {
+          "x" : 0.0901162848343251,
+          "y" : 0.52903225815385724
+        },
+        "bottomLeft" : {
+          "x" : 0.0901162848343251,
+          "y" : 0.59722222350792897
+        }
+      },
+      "text" : "are optimized for visual recognition, image reasoning, captioning, and answering",
+      "confidence" : 1
+    },
+    {
+      "quad" : {
+        "bottomRight" : {
+          "x" : 0.89534883586385217,
+          "y" : 0.67777777823100049
+        },
+        "topRight" : {
+          "x" : 0.89534883586385217,
+          "y" : 0.61250000045322273
+        },
+        "topLeft" : {
+          "x" : 0.090116291918539704,
+          "y" : 0.61250000045322273
+        },
+        "bottomLeft" : {
+          "x" : 0.090116291918539704,
+          "y" : 0.67777777823100049
+        }
+      },
+      "text" : "general questions about an image. The models outperform many of the available",
+      "confidence" : 1
+    },
+    {
+      "quad" : {
+        "bottomRight" : {
+          "x" : 0.82412790423543425,
+          "y" : 0.7486111114529298
+        },
+        "topRight" : {
+          "x" : 0.82412790423543425,
+          "y" : 0.69677419431747922
+        },
+        "topLeft" : {
+          "x" : 0.090116292296957709,
+          "y" : 0.69677419431747922
+        },
+        "bottomLeft" : {
+          "x" : 0.090116292296957709,
+          "y" : 0.7486111114529298
+        }
+      },
+      "text" : "open source and closed multimodal models on common industry benchmarks.",
+      "confidence" : 1
+    }
+  ]
+}

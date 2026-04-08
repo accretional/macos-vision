@@ -1,0 +1,43 @@
+{
+  "classifications" : [
+    {
+      "confidence" : 0.87991577386856079,
+      "identifier" : "people"
+    },
+    {
+      "confidence" : 0.8798828125,
+      "identifier" : "adult"
+    },
+    {
+      "confidence" : 0.6230621337890625,
+      "identifier" : "structure"
+    },
+    {
+      "confidence" : 0.62304693460464478,
+      "identifier" : "conveyance"
+    },
+    {
+      "confidence" : 0.623046875,
+      "identifier" : "door"
+    },
+    {
+      "confidence" : 0.623046875,
+      "identifier" : "portal"
+    },
+    {
+      "confidence" : 0.120361328125,
+      "identifier" : "teen"
+    },
+    {
+      "confidence" : 0.0615234375,
+      "identifier" : "child"
+    }
+  ],
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/gorilla.jpg",
+    "filename" : "gorilla.jpg",
+    "width" : 640,
+    "height" : 480
+  },
+  "operation" : "classify"
+}

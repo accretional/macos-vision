@@ -1,0 +1,13 @@
+{
+  "scores" : {
+    "overallScore" : 0.048553466796875,
+    "isUtility" : false
+  },
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/gorilla.jpg",
+    "filename" : "gorilla.jpg",
+    "width" : 640,
+    "height" : 480
+  },
+  "operation" : "aesthetics"
+}

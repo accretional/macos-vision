@@ -9,5 +9,4 @@ playground
 .build
 .vscode
 Package.resolved
-sample_data/output/
 temp*/

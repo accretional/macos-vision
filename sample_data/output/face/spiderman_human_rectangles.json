@@ -1,0 +1,31 @@
+{
+  "humans" : [
+    {
+      "boundingBox" : {
+        "y" : 0.1463448703289032,
+        "x" : 0.70665828187261992,
+        "width" : 0.11599666269580323,
+        "height" : 0.2932477593421936
+      },
+      "upperBodyOnly" : true,
+      "confidence" : 0.78343445062637329
+    },
+    {
+      "boundingBox" : {
+        "y" : 0.1360909640789032,
+        "x" : 0.22100083672221582,
+        "width" : 0.10406197415324711,
+        "height" : 0.2585100531578064
+      },
+      "upperBodyOnly" : true,
+      "confidence" : 0.77402913570404053
+    }
+  ],
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/spiderman.jpg",
+    "filename" : "spiderman.jpg",
+    "width" : 564,
+    "height" : 423
+  },
+  "operation" : "human-rectangles"
+}

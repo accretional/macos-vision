@@ -1,0 +1,47 @@
+{
+  "faces" : [
+    {
+      "boundingBox" : {
+        "y" : 0.28432677686214447,
+        "x" : 0.70023095607757568,
+        "width" : 0.19782461225986481,
+        "height" : 0.19782461225986481
+      },
+      "confidence" : 0.80858433246612549
+    },
+    {
+      "boundingBox" : {
+        "y" : 0.34904651343822479,
+        "x" : 0.10497734695672989,
+        "width" : 0.17925383150577545,
+        "height" : 0.17925383150577545
+      },
+      "confidence" : 0.803131103515625
+    },
+    {
+      "boundingBox" : {
+        "y" : 0.50872059166431427,
+        "x" : 0.4089885950088501,
+        "width" : 0.17246259748935699,
+        "height" : 0.17246259748935699
+      },
+      "confidence" : 0.76610314846038818
+    },
+    {
+      "boundingBox" : {
+        "y" : 0.18770955502986908,
+        "x" : 0.37899443507194519,
+        "width" : 0.18380548059940338,
+        "height" : 0.18380548059940338
+      },
+      "confidence" : 0.75389611721038818
+    }
+  ],
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/bohemian_rhapsody.jpg",
+    "filename" : "bohemian_rhapsody.jpg",
+    "width" : 760,
+    "height" : 760
+  },
+  "operation" : "face-rectangles"
+}

@@ -1,0 +1,20 @@
+{
+  "faces" : [
+    {
+      "boundingBox" : {
+        "y" : 0.28889833390712738,
+        "x" : 0.26233312487602234,
+        "width" : 0.47457781434059143,
+        "height" : 0.47457781434059143
+      },
+      "quality" : 0.74609375
+    }
+  ],
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/sample_data\/input\/images\/fred_yass.png",
+    "filename" : "fred_yass.png",
+    "width" : 936,
+    "height" : 936
+  },
+  "operation" : "face-quality"
+}
