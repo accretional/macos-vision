@@ -27,7 +27,7 @@ if [ "${1:-}" = "--reset" ]; then
     rm -rf "$BASELINE"
 fi
 
-mkdir -p "$BASELINE/single" "$BASELINE/batch" "$BASELINE/merge" "$BASELINE/segment"
+mkdir -p "$BASELINE/single" "$BASELINE/batch" "$BASELINE/merge" "$BASELINE/segment" "$BASELINE/face" "$BASELINE/classify" "$BASELINE/track"
 baseline_updated=0
 
 if [ ! -f "$BASELINE/single/handwriting.json" ]; then

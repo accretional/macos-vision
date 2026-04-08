@@ -1,0 +1,143 @@
+{
+  "observations" : [
+    {
+      "confidence" : 1,
+      "quad" : {
+        "bottomLeft" : {
+          "x" : 0.09011629800287288,
+          "y" : 0.35483871098527953
+        },
+        "topRight" : {
+          "y" : 0.28333333395755611,
+          "x" : 0.87936045388666206
+        },
+        "bottomRight" : {
+          "x" : 0.87936045388666206,
+          "y" : 0.35483871098527953
+        },
+        "topLeft" : {
+          "x" : 0.09011629800287288,
+          "y" : 0.28333333395755611
+        }
+      },
+      "text" : "The Llama 3.2-Vision collection of multimodal large language models (LLMS) is a"
+    },
+    {
+      "text" : "collection of instruction-tuned image reasoning generative models in lIb and 90B",
+      "confidence" : 1,
+      "quad" : {
+        "bottomLeft" : {
+          "x" : 0.090116268965468371,
+          "y" : 0.43225806298465586
+        },
+        "topRight" : {
+          "y" : 0.36774193719967596,
+          "x" : 0.88372092899964794
+        },
+        "topLeft" : {
+          "x" : 0.090116268965468371,
+          "y" : 0.36774193719967596
+        },
+        "bottomRight" : {
+          "x" : 0.88372092899964794,
+          "y" : 0.43225806298465586
+        }
+      }
+    },
+    {
+      "quad" : {
+        "topRight" : {
+          "y" : 0.44838709880105843,
+          "x" : 0.90988372519304139
+        },
+        "bottomLeft" : {
+          "x" : 0.090116269138353855,
+          "y" : 0.51290322458603832
+        },
+        "topLeft" : {
+          "y" : 0.44838709880105843,
+          "x" : 0.090116269138353855
+        },
+        "bottomRight" : {
+          "y" : 0.51290322458603832,
+          "x" : 0.90988372519304139
+        }
+      },
+      "confidence" : 1,
+      "text" : "sizes (text + images in \/ text out). The Llama 3.2-Vision instruction-tuned models"
+    },
+    {
+      "quad" : {
+        "bottomRight" : {
+          "y" : 0.59722222168345418,
+          "x" : 0.87790696296000648
+        },
+        "topRight" : {
+          "y" : 0.52580645030504303,
+          "x" : 0.87790696296000648
+        },
+        "bottomLeft" : {
+          "x" : 0.090116283028365843,
+          "y" : 0.59722222168345418
+        },
+        "topLeft" : {
+          "x" : 0.090116283028365843,
+          "y" : 0.52580645030504303
+        }
+      },
+      "confidence" : 1,
+      "text" : "are optimized for visual recognition, image reasoning, captioning, and answering"
+    },
+    {
+      "quad" : {
+        "topLeft" : {
+          "y" : 0.61250000048202458,
+          "x" : 0.090116291199582074
+        },
+        "bottomRight" : {
+          "x" : 0.89534883514489449,
+          "y" : 0.67777777825980234
+        },
+        "bottomLeft" : {
+          "y" : 0.67777777825980234,
+          "x" : 0.090116291199582074
+        },
+        "topRight" : {
+          "x" : 0.89534883514489449,
+          "y" : 0.61250000048202458
+        }
+      },
+      "text" : "general questions about an image. The models outperform many of the available",
+      "confidence" : 1
+    },
+    {
+      "text" : "open source and closed multimodal models on common industry benchmarks.",
+      "confidence" : 1,
+      "quad" : {
+        "topRight" : {
+          "y" : 0.69677419324689094,
+          "x" : 0.82558139034792843
+        },
+        "bottomLeft" : {
+          "x" : 0.090116302457303524,
+          "y" : 0.75161290360794786
+        },
+        "bottomRight" : {
+          "x" : 0.82558139034792843,
+          "y" : 0.75161290360794786
+        },
+        "topLeft" : {
+          "y" : 0.69677419324689094,
+          "x" : 0.090116302457303524
+        }
+      }
+    }
+  ],
+  "texts" : "The Llama 3.2-Vision collection of multimodal large language models (LLMS) is a\ncollection of instruction-tuned image reasoning generative models in lIb and 90B\nsizes (text + images in \/ text out). The Llama 3.2-Vision instruction-tuned models\nare optimized for visual recognition, image reasoning, captioning, and answering\ngeneral questions about an image. The models outperform many of the available\nopen source and closed multimodal models on common industry benchmarks.",
+  "info" : {
+    "height" : 720,
+    "filename" : "handwriting.webp",
+    "filepath" : "\/Users\/abao\/Documents\/Github\/macos-vision-ocr\/.\/images\/handwriting.webp",
+    "width" : 1600
+  }
+}

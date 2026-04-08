@@ -1,5 +1,5 @@
 BINARY=".build/debug/macos-vision"
-IMAGES="images"
+IMAGES="data/images"
 BASELINE="tests/tmp/baseline"
 
 pass() { echo "  PASS  $1"; PASS=$((PASS + 1)); }

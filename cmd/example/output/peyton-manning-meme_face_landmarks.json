@@ -1,0 +1,12 @@
+{
+  "faces" : [
+
+  ],
+  "info" : {
+    "filepath" : "\/Users\/rithesh\/Documents\/macos-vision\/data\/images\/peyton-manning-meme.jpg",
+    "filename" : "peyton-manning-meme.jpg",
+    "width" : 528,
+    "height" : 623
+  },
+  "operation" : "face-landmarks"
+}
