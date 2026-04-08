@@ -11,7 +11,7 @@ A macOS CLI tool wrapping Apple's Vision framework, written in Objective-C.
 | `classify` | Scene/object classification and image analysis |
 | `segment`  | Background removal, person segmentation, and saliency |
 | `track`    | Video tracking and image registration |
-| `svg`      | Overlay Vision JSON on the source image as SVG |
+| `svg`      | Overlay Vision JSON output as SVG shapes on the source image |
 | `debug`    | Print image metadata (dimensions, file size) |
 
 ## Build and Install
@@ -54,7 +54,7 @@ Flags: `--img`, `--img-dir`, `--output`, `--output-dir`, `--rec-langs`, `--merge
 
 | Operation | Description |
 |-----------|-------------|
-| *(none: fixed pipeline)* | Recognize text; JSON with strings, confidence, and corner quads (`VNRecognizeTextRequest`) |
+| ocr *(default)* | Recognize text; JSON with strings, confidence, and corner quads (`VNRecognizeTextRequest`) |
 
 ### `face`
 
@@ -109,25 +109,24 @@ Flags: `--video` *or* `--img-dir`, `--output`, `--output-dir`, `--operation`
 
 ### `svg`
 
-Reads the `operation` field inside the JSON (from `face`, `classify`, or `track`). Other JSON shapes are not overlaid.
+Reads the `operation` field inside the JSON and overlays the appropriate shapes. Operations with no spatial data (`classify`, `contours`, `aesthetics`, `feature-print`) produce no overlay.
 
 Flags: `--json`, `--img`, `--output`, `--show-labels`
 
-| JSON `operation` | Description |
+| JSON `operation` | Overlay |
 |--------------------|----------------|
-| `face-rectangles` | Boxes for each face |
-| `face-landmarks` | Face box + landmark regions / points |
-| `face-quality` | Face box + quality label |
-| `human-rectangles` | Person boxes |
+| `face-rectangles` | Face bounding boxes |
+| `face-landmarks` | Face box + landmark points |
+| `face-quality` | Face box + quality score |
+| `human-rectangles` | Person bounding boxes |
 | `body-pose` | Body skeleton |
 | `hand-pose` | Hand skeleton |
-| `animal-pose` | Animal pose |
-| `classify` | Top classification labels |
-| `animals` | Animal regions |
-| `rectangles` | Detected rectangles |
+| `animal-pose` | Animal keypoints |
+| `animals` | Animal bounding boxes |
+| `rectangles` | Detected quads |
 | `horizon` | Horizon line |
 | `trajectories` | Trajectory paths |
-| `aesthetics` | Score labels |
+| `ocr` | Text observation quads |
 
 ### `debug`
 
@@ -137,9 +136,15 @@ Flags: `--img`, `--img-dir`, `--output`, `--output-dir`
 |-----------|-------------|
 | *(none)* | Print JSON: filename, path, width, height, file size |
 
+## Running examples
+
+```bash
+bash cmd/example/all_subcommands.sh        # run all subcommands, output to sample_data/output/
+bash cmd/example/subcommand_face.sh        # face only
+```
+
 ## Tests
 
 ```bash
-bash tests/run.sh           # run all tests
-bash tests/run.sh --reset   # regenerate baselines
+bash tests/smoke-test.sh    # build and run all subcommand unit tests
 ```
