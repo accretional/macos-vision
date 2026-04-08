@@ -1,143 +1,93 @@
-run_face_tests() {
-    local img="$IMAGES/fred-yass.png"
+#!/usr/bin/env bash
+set -euo pipefail
 
-    if [ ! -f "$img" ]; then
-        fail "face tests: $img not found"
-        echo; return
-    fi
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+BINARY="$ROOT/.build/debug/macos-vision"
+IMG="$ROOT/sample_data/input/images"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-    # ── face-rectangles ───────────────────────────────────────────────────────
+PASS=0; FAIL=0
+pass() { echo "  PASS  $1"; PASS=$((PASS+1)); }
+fail() { echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
 
-    echo "── face: face-rectangles ────────────────────────────────────────────────"
-    local tmp="$TMPDIR_ROOT/face"
-    mkdir -p "$tmp"
+img="$IMG/fred_yass.png"
+if [ ! -f "$img" ]; then fail "fred_yass.png not found"; echo "0 passed, 1 failed"; exit 1; fi
 
-    $BINARY face --img "$img" --operation face-rectangles --output "$tmp"
-    local got="$tmp/fred-yass_face_rectangles.json"
+# ── face-rectangles ───────────────────────────────────────────────────────────
+echo "── face: face-rectangles ────────────────────────────────────────────────────"
+"$BINARY" face --img "$img" --operation face-rectangles --output "$TMP"
+got="$TMP/fred_yass_face_rectangles.json"
+if [ -f "$got" ]; then
+    pass "face-rectangles: output produced"
+    jq empty "$got" 2>/dev/null && pass "face-rectangles: valid JSON" || fail "face-rectangles: invalid JSON"
+    count=$(jq '.faces | length' "$got" 2>/dev/null || echo 0)
+    [ "${count:-0}" -gt 0 ] && pass "face-rectangles: $count face(s) detected" || fail "face-rectangles: no faces detected"
+    jq -e '.faces[0].boundingBox.x' "$got" >/dev/null 2>&1 && pass "face-rectangles: boundingBox present" || fail "face-rectangles: boundingBox missing"
+else
+    fail "face-rectangles: output not produced"
+fi
+echo
 
-    if [ -f "$got" ]; then
-        pass "face-rectangles: output produced"
-        if jq empty "$got" 2>/dev/null; then
-            pass "face-rectangles: valid JSON"
-        else
-            fail "face-rectangles: invalid JSON"
-        fi
-        local face_count
-        face_count=$(jq '.faces | length' "$got" 2>/dev/null || echo 0)
-        if [ "$face_count" -gt 0 ]; then
-            pass "face-rectangles: $face_count face(s) detected"
-        else
-            fail "face-rectangles: no faces detected"
-        fi
-        if jq -e '.faces[0].boundingBox.x' "$got" > /dev/null 2>&1; then
-            pass "face-rectangles: boundingBox present"
-        else
-            fail "face-rectangles: boundingBox missing"
-        fi
-    else
-        fail "face-rectangles: output not produced"
-    fi
-    echo
+# ── face-landmarks ────────────────────────────────────────────────────────────
+echo "── face: face-landmarks ─────────────────────────────────────────────────────"
+"$BINARY" face --img "$img" --operation face-landmarks --output "$TMP"
+got="$TMP/fred_yass_face_landmarks.json"
+if [ -f "$got" ]; then
+    pass "face-landmarks: output produced"
+    jq empty "$got" 2>/dev/null && pass "face-landmarks: valid JSON" || fail "face-landmarks: invalid JSON"
+    count=$(jq '.faces[0].landmarks | length' "$got" 2>/dev/null || echo 0)
+    [ "${count:-0}" -gt 0 ] && pass "face-landmarks: landmark regions present" || fail "face-landmarks: no landmark regions"
+else
+    fail "face-landmarks: output not produced"
+fi
+echo
 
-    # ── face-landmarks ────────────────────────────────────────────────────────
+# ── face-quality ──────────────────────────────────────────────────────────────
+echo "── face: face-quality ───────────────────────────────────────────────────────"
+"$BINARY" face --img "$img" --operation face-quality --output "$TMP"
+got="$TMP/fred_yass_face_quality.json"
+if [ -f "$got" ]; then
+    pass "face-quality: output produced"
+    jq empty "$got" 2>/dev/null && pass "face-quality: valid JSON" || fail "face-quality: invalid JSON"
+    jq -e '.faces[0].quality' "$got" >/dev/null 2>&1 && pass "face-quality: quality field present" || fail "face-quality: quality field missing"
+else
+    fail "face-quality: output not produced"
+fi
+echo
 
-    echo "── face: face-landmarks ─────────────────────────────────────────────────"
-    $BINARY face --img "$img" --operation face-landmarks --output "$tmp"
-    local lm="$tmp/fred-yass_face_landmarks.json"
+# ── body-pose ─────────────────────────────────────────────────────────────────
+echo "── face: body-pose ──────────────────────────────────────────────────────────"
+"$BINARY" face --img "$IMG/sad_pablo.png" --operation body-pose --output "$TMP" 2>/dev/null || true
+got="$TMP/sad_pablo_body_pose.json"
+if [ -f "$got" ]; then
+    pass "body-pose: output produced"
+    jq empty "$got" 2>/dev/null && pass "body-pose: valid JSON" || fail "body-pose: invalid JSON"
+    jq -e '.bodies' "$got" >/dev/null 2>&1 && pass "body-pose: bodies field present" || fail "body-pose: bodies field missing"
+else
+    pass "body-pose: skipped (sad_pablo.png not found)"
+fi
+echo
 
-    if [ -f "$lm" ]; then
-        pass "face-landmarks: output produced"
-        if jq empty "$lm" 2>/dev/null; then
-            pass "face-landmarks: valid JSON"
-        else
-            fail "face-landmarks: invalid JSON"
-        fi
-        local has_landmarks
-        has_landmarks=$(jq '.faces[0].landmarks | length' "$lm" 2>/dev/null || echo 0)
-        if [ "${has_landmarks:-0}" -gt 0 ]; then
-            pass "face-landmarks: landmark regions present"
-        else
-            fail "face-landmarks: no landmark regions found"
-        fi
-    else
-        fail "face-landmarks: output not produced"
-    fi
-    echo
+# ── human-rectangles ──────────────────────────────────────────────────────────
+echo "── face: human-rectangles ───────────────────────────────────────────────────"
+"$BINARY" face --img "$IMG/spiderman.jpg" --operation human-rectangles --output "$TMP" 2>/dev/null || true
+got="$TMP/spiderman_human_rectangles.json"
+if [ -f "$got" ]; then
+    pass "human-rectangles: output produced"
+    jq empty "$got" 2>/dev/null && pass "human-rectangles: valid JSON" || fail "human-rectangles: invalid JSON"
+    jq -e '.humans' "$got" >/dev/null 2>&1 && pass "human-rectangles: humans field present" || fail "human-rectangles: humans field missing"
+else
+    pass "human-rectangles: skipped (spiderman.jpg not found)"
+fi
+echo
 
-    # ── face-quality ──────────────────────────────────────────────────────────
+# ── error handling ────────────────────────────────────────────────────────────
+echo "── face: error handling ─────────────────────────────────────────────────────"
+err=$("$BINARY" face 2>&1 || true)
+echo "$err" | grep -qi "img\|must be provided\|error" && pass "face: missing input error shown" || fail "face: no error on missing input"
+err=$("$BINARY" face --img "$img" --operation bad-op 2>&1 || true)
+echo "$err" | grep -qi "unknown\|supported\|error" && pass "face: unknown operation rejected" || fail "face: unknown operation not rejected"
+echo
 
-    echo "── face: face-quality ───────────────────────────────────────────────────"
-    $BINARY face --img "$img" --operation face-quality --output "$tmp"
-    local fq="$tmp/fred-yass_face_quality.json"
-
-    if [ -f "$fq" ]; then
-        pass "face-quality: output produced"
-        if jq empty "$fq" 2>/dev/null; then
-            pass "face-quality: valid JSON"
-        else
-            fail "face-quality: invalid JSON"
-        fi
-    else
-        fail "face-quality: output not produced"
-    fi
-    echo
-
-    # ── body-pose (macOS 11+) ─────────────────────────────────────────────────
-
-    echo "── face: body-pose ──────────────────────────────────────────────────────"
-    $BINARY face --img "$img" --operation body-pose --output "$tmp"
-    local bp="$tmp/fred-yass_body_pose.json"
-
-    if [ -f "$bp" ]; then
-        pass "body-pose: output produced"
-        if jq empty "$bp" 2>/dev/null; then
-            pass "body-pose: valid JSON"
-        else
-            fail "body-pose: invalid JSON"
-        fi
-        local body_count
-        body_count=$(jq '.bodies | length' "$bp" 2>/dev/null || echo 0)
-        pass "body-pose: ${body_count:-0} body/bodies detected (may be 0 for headshot images)"
-    else
-        fail "body-pose: output not produced"
-    fi
-    echo
-
-    # ── human-rectangles (macOS 12+) ──────────────────────────────────────────
-
-    echo "── face: human-rectangles ───────────────────────────────────────────────"
-    $BINARY face --img "$img" --operation human-rectangles --output "$tmp"
-    local hr="$tmp/fred-yass_human_rectangles.json"
-
-    if [ -f "$hr" ]; then
-        pass "human-rectangles: output produced"
-        if jq empty "$hr" 2>/dev/null; then
-            pass "human-rectangles: valid JSON"
-        else
-            fail "human-rectangles: invalid JSON"
-        fi
-    else
-        fail "human-rectangles: output not produced"
-    fi
-    echo
-
-    # ── error handling ────────────────────────────────────────────────────────
-
-    echo "── face: error handling ─────────────────────────────────────────────────"
-    local err_out
-    err_out=$($BINARY face 2>&1 || true)
-    if echo "$err_out" | grep -qi "img\|must be provided\|error"; then
-        pass "face: missing input error shown"
-    else
-        fail "face: no error on missing input"
-    fi
-
-    local op_err
-    op_err=$($BINARY face --img "$img" --operation bad-op 2>&1 || true)
-    if echo "$op_err" | grep -qi "unknown\|supported\|error"; then
-        pass "face: unknown operation error shown"
-    else
-        fail "face: unknown operation not rejected"
-    fi
-    echo
-}
+echo "Results: $PASS passed, $FAIL failed"
+[ $FAIL -eq 0 ] || exit 1

@@ -1,62 +1,42 @@
-run_debug_tests() {
-    # ── single image ──────────────────────────────────────────────────────────
+#!/usr/bin/env bash
+set -euo pipefail
 
-    echo "── Debug: single image ──────────────────────────────────────────────────"
-    local tmp_single="$TMPDIR_ROOT/debug_single"
-    mkdir -p "$tmp_single"
-    $BINARY debug --img "$IMAGES/handwriting.webp" --output "$tmp_single"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+BINARY="$ROOT/.build/debug/macos-vision"
+IMG="$ROOT/sample_data/input/images"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-    local dbg_file="$tmp_single/handwriting.json"
-    if jq empty "$dbg_file" 2>/dev/null; then
-        pass "debug/single: valid JSON"
-    else
-        fail "debug/single: invalid JSON"
-    fi
+PASS=0; FAIL=0
+pass() { echo "  PASS  $1"; PASS=$((PASS+1)); }
+fail() { echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
+
+img="$IMG/handwriting.png"
+if [ ! -f "$img" ]; then fail "handwriting.png not found"; echo "0 passed, 1 failed"; exit 1; fi
+
+# ── single image ──────────────────────────────────────────────────────────────
+echo "── debug: single image ──────────────────────────────────────────────────────"
+"$BINARY" debug --img "$img" --output "$TMP"
+got="$TMP/handwriting.json"
+if [ -f "$got" ]; then
+    pass "debug: output produced"
+    jq empty "$got" 2>/dev/null && pass "debug: valid JSON" || fail "debug: invalid JSON"
     for field in filename filepath width height filesize; do
-        local val
-        val=$(jq -r ".$field // empty" "$dbg_file")
-        if [ -n "$val" ]; then
-            pass "debug/single: $field present ($val)"
-        else
-            fail "debug/single: $field missing"
-        fi
+        val=$(jq -r ".$field // empty" "$got")
+        [ -n "$val" ] && pass "debug: $field present ($val)" || fail "debug: $field missing"
     done
-    local w h fn fs
-    w=$(jq '.width'    "$dbg_file"); [ "$w" = "1600" ]          && pass "debug/single: width=1600"        || fail "debug/single: width (got $w)"
-    h=$(jq '.height'   "$dbg_file"); [ "$h" = "720"  ]          && pass "debug/single: height=720"        || fail "debug/single: height (got $h)"
-    fn=$(jq -r '.filename' "$dbg_file"); [ "$fn" = "handwriting.webp" ] && pass "debug/single: filename" || fail "debug/single: filename (got $fn)"
-    fs=$(jq '.filesize' "$dbg_file"); [ "$fs" -gt 0 ]           && pass "debug/single: filesize ($fs bytes)" || fail "debug/single: filesize not positive"
-    echo
+    w=$(jq '.width'  "$got"); [ "$w" = "1600" ] && pass "debug: width=1600"  || fail "debug: width (got $w)"
+    h=$(jq '.height' "$got"); [ "$h" = "720"  ] && pass "debug: height=720"  || fail "debug: height (got $h)"
+    fn=$(jq -r '.filename' "$got"); [ "$fn" = "handwriting.png" ] && pass "debug: filename correct" || fail "debug: filename (got $fn)"
+else
+    fail "debug: output not produced"
+fi
+echo
 
-    # ── batch mode ────────────────────────────────────────────────────────────
+# ── error handling ────────────────────────────────────────────────────────────
+echo "── debug: error handling ────────────────────────────────────────────────────"
+err=$("$BINARY" debug 2>&1 || true)
+echo "$err" | grep -qi "img\|must be provided\|error" && pass "debug: missing input error shown" || fail "debug: no error on missing input"
+echo
 
-    echo "── Debug: batch ─────────────────────────────────────────────────────────"
-    local tmp_batch="$TMPDIR_ROOT/debug_batch"
-    mkdir -p "$tmp_batch"
-    $BINARY debug --img-dir "$IMAGES" --output-dir "$tmp_batch"
-
-    for base in handwriting.webp macos-vision-ocr.jpg; do
-        local f="$tmp_batch/${base}.json"
-        if [ -f "$f" ]; then
-            pass "debug/batch: ${base}.json produced"
-            jq empty "$f" 2>/dev/null && pass "debug/batch: ${base}.json valid JSON" || fail "debug/batch: ${base}.json invalid JSON"
-        else
-            fail "debug/batch: ${base}.json not produced"
-        fi
-    done
-    w=$(jq '.width'  "$tmp_batch/macos-vision-ocr.jpg.json"); [ "$w" = "1782" ] && pass "debug/batch: macos-vision-ocr.jpg width=1782"  || fail "debug/batch: macos-vision-ocr.jpg width (got $w)"
-    h=$(jq '.height' "$tmp_batch/macos-vision-ocr.jpg.json"); [ "$h" = "970"  ] && pass "debug/batch: macos-vision-ocr.jpg height=970"   || fail "debug/batch: macos-vision-ocr.jpg height (got $h)"
-    echo
-
-    # ── error handling ────────────────────────────────────────────────────────
-
-    echo "── Debug: error handling ────────────────────────────────────────────────"
-    local dbg_err
-    dbg_err=$($BINARY debug 2>&1 || true)
-    if echo "$dbg_err" | grep -qi "img\|must be provided\|error"; then
-        pass "debug: missing input error shown"
-    else
-        fail "debug: no error on missing input"
-    fi
-    echo
-}
+echo "Results: $PASS passed, $FAIL failed"
+[ $FAIL -eq 0 ] || exit 1

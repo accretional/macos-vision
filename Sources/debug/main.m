@@ -93,19 +93,21 @@ typedef NS_ENUM(NSInteger, DebugErrorCode) {
 // ── metadata extraction ───────────────────────────────────────────────────────
 
 - (nullable NSString *)imageMetadataJSON:(NSString *)imagePath error:(NSError **)error {
-    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *absolutePath = [imagePath isAbsolutePath]
+        ? imagePath
+        : [fm.currentDirectoryPath stringByAppendingPathComponent:imagePath];
+
+    NSImage *image = [[NSImage alloc] initByReferencingFile:absolutePath];
     if (!image) {
         if (error) {
             *error = [NSError errorWithDomain:DebugErrorDomain
                                          code:DebugErrorImageLoadFailed
                                      userInfo:@{NSLocalizedDescriptionKey:
-                                                    [NSString stringWithFormat:@"Failed to load image: %@", imagePath]}];
+                                                    [NSString stringWithFormat:@"Failed to load image: %@", absolutePath]}];
         }
         return nil;
     }
-
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *absolutePath = [fm.currentDirectoryPath stringByAppendingPathComponent:imagePath];
     NSDictionary *attrs = [fm attributesOfItemAtPath:absolutePath error:error];
     if (!attrs) return nil;
 
