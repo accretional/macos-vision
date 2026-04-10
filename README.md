@@ -12,13 +12,15 @@ A macOS CLI tool wrapping Apple's Vision framework, written in Objective-C.
 | `segment`  | Background removal, person segmentation, and saliency |
 | `track`    | Video tracking and image registration |
 | `svg`      | Overlay Vision JSON output as SVG shapes on the source image |
+| `audio`    | Audio inference: transcription, classification, Shazam, pitch, noise |
 | `debug`    | Print image metadata (dimensions, file size) |
 
 ## Build and Install
 
 ```bash
-swift build -c release
-cp .build/release/macos-vision /usr/local/bin/
+make          # debug build + sign
+make release  # release build + sign
+make install  # release build + sign + copy to /usr/local/bin
 ```
 
 ## Usage
@@ -43,6 +45,10 @@ macos-vision track --video clip.mp4
 
 # Svg (JSON from `face`, `classify`, or `track` with a supported `operation`)
 macos-vision svg --json result.json --img image.png
+
+# Audio
+macos-vision audio --audio clip.m4a --operation transcribe
+macos-vision audio --audio clip.m4a --operation classify --topk 5
 
 # Debug
 macos-vision debug --img image.png
@@ -127,6 +133,31 @@ Flags: `--json`, `--img`, `--output`, `--show-labels`
 | `horizon` | Horizon line |
 | `trajectories` | Trajectory paths |
 | `ocr` | Text observation quads |
+
+### `audio`
+
+Flags: `--audio`, `--audio-dir`, `--output`, `--output-dir`, `--operation`, `--audio-lang`, `--offline`, `--topk`, `--merge`, `--catalog`, `--debug`, `--mic`, `--screenshot`, `--camera`, `--record`, `--camera-index`, `--display-index`
+
+| Operation | Description |
+|-----------|-------------|
+| `classify` *(default)* | Sound classification with top-K labels (macOS 12+, `SNClassifySoundRequest`) |
+| `transcribe` | Speech-to-text via `SFSpeechRecognizer` (`SpeechAnalyzer` is Swift exclusive) |
+| `shazam` | Song identification via ShazamKit (macOS 12+) |
+| `shazam-custom` | Match audio against a custom `.shazamcatalog` (use `--catalog`) |
+| `shazam-build` | Build a `.shazamcatalog` from an audio file |
+| `detect` | Sound event detection — all classes with timestamps |
+| `noise` | Measure noise / RMS level over time |
+| `pitch` | Pitch (fundamental frequency) analysis over time |
+| `isolate` | Voice isolation (returns processed audio path) |
+
+**Capture / streaming modes** (replaces `--audio` / `--audio-dir`):
+
+| Flag | Description |
+|------|-------------|
+| `--mic` | Stream from microphone; press Enter to stop |
+| `--screenshot` | Capture a screenshot; press Enter to capture (`--display-index` selects display) |
+| `--camera` | Capture a photo from camera; press Enter to capture (`--camera-index` selects device) |
+| `--record` | Record camera + microphone video; Enter to start, Enter to stop |
 
 ### `debug`
 

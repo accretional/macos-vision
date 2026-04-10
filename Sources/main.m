@@ -6,6 +6,7 @@
 #import "classify/main.h"
 #import "track/main.h"
 #import "svg/main.h"
+#import "audio/main.h"
 
 static void printUsage(void) {
     printf(
@@ -19,13 +20,14 @@ static void printUsage(void) {
         "  track     Video tracking and image registration\n"
         "  svg       Overlay Vision JSON output as SVG shapes on the source image\n"
         "  debug     Print image metadata (dimensions, file size)\n"
+        "  audio     Audio inference: transcription, classification, Shazam, pitch, noise\n"
         "\n"
         "COMMON OPTIONS:\n"
         "  --img <path>          Path to a single image file\n"
         "  --img-dir <path>      Directory containing images for batch/sequence mode\n"
         "  --output <path>       Output directory for single image mode\n"
         "  --output-dir <path>   Output directory for batch mode\n"
-        "  --debug               Draw bounding boxes / joints on the image\n"
+        "  --debug               Draw bounding boxes / joints on the image (or emit processing_ms)\n"
         "  --boxes-format <fmt>  Output format for debug images: png (default), jpg, tiff, bmp, gif\n"
         "  --json <path>         Path to a Vision JSON file (used by svg subcommand)\n"
         "\n"
@@ -60,6 +62,24 @@ static void printUsage(void) {
         "  --img <path>          Override source image (optional; falls back to info.filepath in JSON)\n"
         "  --output <path>       Output directory for the SVG file\n"
         "  --show-labels         Show text labels on shapes (default: off)\n"
+        "\n"
+        "AUDIO OPTIONS:\n"
+        "  --audio <path>        Path to a single audio file\n"
+        "  --audio-dir <path>    Directory of audio files (batch mode)\n"
+        "  --operation <op>      transcribe (default: classify) | transcribe-legacy | classify |\n"
+        "                          shazam | detect | noise | pitch | isolate |\n"
+        "                          shazam-custom | shazam-build\n"
+        "  --catalog <path>      .shazamcatalog file for shazam-custom (built with shazam-build)\n"
+        "  --audio-lang <lang>   Language for transcription, e.g. en-US (default)\n"
+        "  --offline             Force on-device speech recognition (macOS 13+)\n"
+        "  --topk <n>            Top-K classifications to return (default 3)\n"
+        "  --merge               Merge batch results into a single JSON\n"
+        "  --mic                 Stream from microphone (press Enter to stop)\n"
+        "  --screenshot          Capture a screenshot (press Enter to capture)\n"
+        "  --camera              Capture a photo from camera (press Enter to capture)\n"
+        "  --record              Record camera+microphone video (Enter start, Enter stop)\n"
+        "  --camera-index <n>    Camera device index (default 0)\n"
+        "  --display-index <n>   Display index for screenshot (default 0 = main)\n"
     );
 }
 
@@ -89,6 +109,20 @@ int main(int argc, const char * argv[]) {
         NSString *boxesFormat = @"png";
         NSString *operation   = nil;
         NSString *jsonPath    = nil;
+
+        // Audio-specific args
+        NSString *audio       = nil;
+        NSString *audioDir    = nil;
+        NSString *catalog     = nil;
+        NSString *audioLang   = @"en-US";
+        BOOL offline          = NO;
+        NSInteger topk        = 3;
+        BOOL mic              = NO;
+        BOOL screenshot       = NO;
+        BOOL camera           = NO;
+        BOOL record           = NO;
+        NSInteger cameraIndex  = 0;
+        NSInteger displayIndex = 0;
 
         for (NSInteger i = 1; i < (NSInteger)args.count; i++) {
             NSString *arg = args[i];
@@ -124,6 +158,30 @@ int main(int argc, const char * argv[]) {
                 lang = YES;
             } else if ([arg isEqualToString:@"--merge"]) {
                 merge = YES;
+            } else if ([arg isEqualToString:@"--audio"] && i + 1 < (NSInteger)args.count) {
+                audio = args[++i];
+            } else if ([arg isEqualToString:@"--audio-dir"] && i + 1 < (NSInteger)args.count) {
+                audioDir = args[++i];
+            } else if ([arg isEqualToString:@"--audio-lang"] && i + 1 < (NSInteger)args.count) {
+                audioLang = args[++i];
+            } else if ([arg isEqualToString:@"--catalog"] && i + 1 < (NSInteger)args.count) {
+                catalog = args[++i];
+            } else if ([arg isEqualToString:@"--offline"]) {
+                offline = YES;
+            } else if ([arg isEqualToString:@"--topk"] && i + 1 < (NSInteger)args.count) {
+                topk = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--mic"]) {
+                mic = YES;
+            } else if ([arg isEqualToString:@"--screenshot"]) {
+                screenshot = YES;
+            } else if ([arg isEqualToString:@"--camera"]) {
+                camera = YES;
+            } else if ([arg isEqualToString:@"--record"]) {
+                record = YES;
+            } else if ([arg isEqualToString:@"--camera-index"] && i + 1 < (NSInteger)args.count) {
+                cameraIndex = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--display-index"] && i + 1 < (NSInteger)args.count) {
+                displayIndex = [args[++i] integerValue];
             } else if (![arg hasPrefix:@"--"] && subcommand == nil) {
                 subcommand = arg;
             } else {
@@ -226,8 +284,29 @@ int main(int argc, const char * argv[]) {
             processor.showLabels = showLabels;
             success = [processor runWithError:&error];
 
+        } else if ([subcommand isEqualToString:@"audio"]) {
+            AudioProcessor *processor = [[AudioProcessor alloc] init];
+            processor.audio         = audio;
+            processor.audioDir      = audioDir;
+            processor.operation     = operation ?: @"classify";
+            processor.output        = output;
+            processor.outputDir     = outputDir;
+            processor.lang          = audioLang;
+            processor.offline       = offline;
+            processor.topk          = topk;
+            processor.merge         = merge;
+            processor.debug         = debug;
+            processor.mic           = mic;
+            processor.screenshot    = screenshot;
+            processor.camera        = camera;
+            processor.record        = record;
+            processor.cameraIndex   = cameraIndex;
+            processor.displayIndex  = displayIndex;
+            processor.catalog       = catalog;
+            success = [processor runWithError:&error];
+
         } else {
-            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, svg, debug\n",
+            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, svg, debug, audio\n",
                     subcommand.UTF8String);
             return 1;
         }

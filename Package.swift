@@ -17,6 +17,9 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreMedia"),
                 .linkedFramework("CoreImage"),
+                .linkedFramework("Speech"),
+                .linkedFramework("SoundAnalysis"),
+                .linkedFramework("ShazamKit"),
             ]
         ),
     ]

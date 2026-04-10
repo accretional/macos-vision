@@ -54,3 +54,18 @@ run_vid "trajectories-video" "$VIDEO" \
     "$BINARY" track --video "$VIDEO" \
                     --operation trajectories \
                     --output "$OUTPUT"
+
+# ── browser-friendly trajectory preview (full JSON can be tens of MB) ─────────
+if [ -f "$OUTPUT/track_trajectories.json" ]; then
+    python3 - "$OUTPUT/track_trajectories.json" "$OUTPUT/track_trajectories_preview.json" <<'PY'
+import json, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    d = json.load(f)
+tr = d.get("trajectories") or []
+d["trajectories"] = tr[:25]
+with open(dst, "w") as o:
+    json.dump(d, o)
+print("  WROTE track_trajectories_preview.json (" + str(len(d["trajectories"])) + " trajectories)")
+PY
+fi

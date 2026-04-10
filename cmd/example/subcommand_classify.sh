@@ -26,7 +26,7 @@ run "classify" "$IMG/gorilla.jpg" \
                        --output "$OUTPUT"
 
 # ── animals ───────────────────────────────────────────────────────────────────
-run "animals" "$IMG/raccoon_cotton_candy.jpg" \
+run "animals" "$IMG/cat_side_eye.jpg" \
     "$BINARY" classify --img "$IMG/cat_side_eye.jpg" \
                        --operation animals \
                        --output "$OUTPUT" \
