@@ -7,6 +7,9 @@
 #import "track/main.h"
 #import "svg/main.h"
 #import "audio/main.h"
+#import "capture/main.h"
+#import "nl/main.h"
+#import "av/main.h"
 
 static void printUsage(void) {
     printf(
@@ -21,6 +24,9 @@ static void printUsage(void) {
         "  svg       Overlay Vision JSON output as SVG shapes on the source image\n"
         "  debug     Print image metadata (dimensions, file size)\n"
         "  audio     Audio inference: transcription, classification, Shazam, pitch, noise\n"
+        "  capture   Capture from screen, camera, or microphone; list capture devices\n"
+        "  nl        NaturalLanguage: language ID, tokenize, tag, embeddings, text classify\n"
+        "  av        AVFoundation: inspect video/audio, metadata, thumbnails, export\n"
         "\n"
         "COMMON OPTIONS:\n"
         "  --img <path>          Path to a single image file\n"
@@ -66,8 +72,8 @@ static void printUsage(void) {
         "AUDIO OPTIONS:\n"
         "  --audio <path>        Path to a single audio file\n"
         "  --audio-dir <path>    Directory of audio files (batch mode)\n"
-        "  --operation <op>      transcribe (default: classify) | transcribe-legacy | classify |\n"
-        "                          shazam | detect | noise | pitch | isolate |\n"
+        "  --operation <op>      transcribe | classify (default) | shazam | detect |\n"
+        "                          noise | pitch | isolate |\n"
         "                          shazam-custom | shazam-build\n"
         "  --catalog <path>      .shazamcatalog file for shazam-custom (built with shazam-build)\n"
         "  --audio-lang <lang>   Language for transcription, e.g. en-US (default)\n"
@@ -75,11 +81,38 @@ static void printUsage(void) {
         "  --topk <n>            Top-K classifications to return (default 3)\n"
         "  --merge               Merge batch results into a single JSON\n"
         "  --mic                 Stream from microphone (press Enter to stop)\n"
-        "  --screenshot          Capture a screenshot (press Enter to capture)\n"
-        "  --camera              Capture a photo from camera (press Enter to capture)\n"
-        "  --record              Record camera+microphone video (Enter start, Enter stop)\n"
-        "  --camera-index <n>    Camera device index (default 0)\n"
-        "  --display-index <n>   Display index for screenshot (default 0 = main)\n"
+        "\n"
+        "CAPTURE OPTIONS:\n"
+        "  --operation <op>      screenshot (default) | camera | mic | list-devices\n"
+        "  --display-index <n>   Display to capture for screenshot (default 0 = main)\n"
+        "\n"
+        "NL OPTIONS (NaturalLanguage):\n"
+        "  --text <str>          Inline text (or use --input / --input-dir)\n"
+        "  --input <file>        Text file\n"
+        "  --input-dir <path>    Directory of .txt / .md files (batch)\n"
+        "  --operation <op>      detect-language | tokenize | tag | embed | distance |\n"
+        "                          contextual-embed | classify\n"
+        "  --language <lang>     BCP-47 hint, e.g. en, fr-FR\n"
+        "  --scheme <s>          tag: pos | ner | lemma | language | script\n"
+        "  --unit <u>            tokenize/tag unit: word (default) | sentence | paragraph\n"
+        "  --word <w>            embed: vector for word; use with --similar for neighbors\n"
+        "  --similar <w>         embed: nearest neighbors to word (--topk)\n"
+        "  --word-a / --word-b   distance: two words (cosine distance)\n"
+        "  --model <path>        classify or tag: compiled .mlmodel path\n"
+        "  --topk <n>            detect-language hypotheses / embed neighbors / classify (default 3)\n"
+        "  --merge               With --input-dir: also write merged JSON to --output\n"
+        "\n"
+        "AV OPTIONS (AVFoundation):\n"
+        "  --video <path>        Video or audio-visual media file\n"
+        "  --img <path>          Still image (thumbnail operation)\n"
+        "  --operation <op>      inspect | tracks | metadata | thumbnail | export |\n"
+        "                          export-audio | list-presets\n"
+        "  --preset <name>       export: low | medium | high | hevc-1080p | hevc-4k |\n"
+        "                          prores-422 | prores-4444 | m4a | passthrough\n"
+        "  --time <seconds>      thumbnail: single frame time (default 0)\n"
+        "  --times <t1,t2,...>   thumbnail: multiple frames\n"
+        "  --time-range <s,d>    export: start seconds and duration\n"
+        "  --key <id>            metadata: filter AVMetadataItem by identifier\n"
     );
 }
 
@@ -109,6 +142,7 @@ int main(int argc, const char * argv[]) {
         NSString *boxesFormat = @"png";
         NSString *operation   = nil;
         NSString *jsonPath    = nil;
+        NSInteger displayIndex = 0;
 
         // Audio-specific args
         NSString *audio       = nil;
@@ -118,11 +152,24 @@ int main(int argc, const char * argv[]) {
         BOOL offline          = NO;
         NSInteger topk        = 3;
         BOOL mic              = NO;
-        BOOL screenshot       = NO;
-        BOOL camera           = NO;
-        BOOL record           = NO;
-        NSInteger cameraIndex  = 0;
-        NSInteger displayIndex = 0;
+
+        NSString *nlText           = nil;
+        NSString *nlInput          = nil;
+        NSString *nlInputDir       = nil;
+        NSString *nlLanguage       = nil;
+        NSString *nlScheme         = nil;
+        NSString *nlTokenizerUnit  = nil;
+        NSString *nlWord           = nil;
+        NSString *nlWordA          = nil;
+        NSString *nlWordB          = nil;
+        NSString *nlSimilar        = nil;
+        NSString *nlModelPath      = nil;
+
+        NSString *avPreset      = nil;
+        NSString *avTime        = nil;
+        NSString *avTimes       = nil;
+        NSString *avTimeRange   = nil;
+        NSString *avMetaKey     = nil;
 
         for (NSInteger i = 1; i < (NSInteger)args.count; i++) {
             NSString *arg = args[i];
@@ -172,16 +219,40 @@ int main(int argc, const char * argv[]) {
                 topk = [args[++i] integerValue];
             } else if ([arg isEqualToString:@"--mic"]) {
                 mic = YES;
-            } else if ([arg isEqualToString:@"--screenshot"]) {
-                screenshot = YES;
-            } else if ([arg isEqualToString:@"--camera"]) {
-                camera = YES;
-            } else if ([arg isEqualToString:@"--record"]) {
-                record = YES;
-            } else if ([arg isEqualToString:@"--camera-index"] && i + 1 < (NSInteger)args.count) {
-                cameraIndex = [args[++i] integerValue];
             } else if ([arg isEqualToString:@"--display-index"] && i + 1 < (NSInteger)args.count) {
                 displayIndex = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--text"] && i + 1 < (NSInteger)args.count) {
+                nlText = args[++i];
+            } else if ([arg isEqualToString:@"--input"] && i + 1 < (NSInteger)args.count) {
+                nlInput = args[++i];
+            } else if ([arg isEqualToString:@"--input-dir"] && i + 1 < (NSInteger)args.count) {
+                nlInputDir = args[++i];
+            } else if ([arg isEqualToString:@"--language"] && i + 1 < (NSInteger)args.count) {
+                nlLanguage = args[++i];
+            } else if ([arg isEqualToString:@"--scheme"] && i + 1 < (NSInteger)args.count) {
+                nlScheme = args[++i];
+            } else if ([arg isEqualToString:@"--unit"] && i + 1 < (NSInteger)args.count) {
+                nlTokenizerUnit = args[++i];
+            } else if ([arg isEqualToString:@"--word"] && i + 1 < (NSInteger)args.count) {
+                nlWord = args[++i];
+            } else if ([arg isEqualToString:@"--word-a"] && i + 1 < (NSInteger)args.count) {
+                nlWordA = args[++i];
+            } else if ([arg isEqualToString:@"--word-b"] && i + 1 < (NSInteger)args.count) {
+                nlWordB = args[++i];
+            } else if ([arg isEqualToString:@"--similar"] && i + 1 < (NSInteger)args.count) {
+                nlSimilar = args[++i];
+            } else if ([arg isEqualToString:@"--model"] && i + 1 < (NSInteger)args.count) {
+                nlModelPath = args[++i];
+            } else if ([arg isEqualToString:@"--preset"] && i + 1 < (NSInteger)args.count) {
+                avPreset = args[++i];
+            } else if ([arg isEqualToString:@"--time"] && i + 1 < (NSInteger)args.count) {
+                avTime = args[++i];
+            } else if ([arg isEqualToString:@"--times"] && i + 1 < (NSInteger)args.count) {
+                avTimes = args[++i];
+            } else if ([arg isEqualToString:@"--time-range"] && i + 1 < (NSInteger)args.count) {
+                avTimeRange = args[++i];
+            } else if ([arg isEqualToString:@"--key"] && i + 1 < (NSInteger)args.count) {
+                avMetaKey = args[++i];
             } else if (![arg hasPrefix:@"--"] && subcommand == nil) {
                 subcommand = arg;
             } else {
@@ -297,16 +368,56 @@ int main(int argc, const char * argv[]) {
             processor.merge         = merge;
             processor.debug         = debug;
             processor.mic           = mic;
-            processor.screenshot    = screenshot;
-            processor.camera        = camera;
-            processor.record        = record;
-            processor.cameraIndex   = cameraIndex;
-            processor.displayIndex  = displayIndex;
             processor.catalog       = catalog;
             success = [processor runWithError:&error];
 
+        } else if ([subcommand isEqualToString:@"capture"]) {
+            CaptureProcessor *processor = [[CaptureProcessor alloc] init];
+            processor.operation    = operation ?: @"screenshot";
+            processor.output       = output;
+            processor.outputDir    = outputDir;
+            processor.displayIndex = displayIndex;
+            processor.debug        = debug;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"nl"]) {
+            NLProcessor *processor = [[NLProcessor alloc] init];
+            processor.text       = nlText;
+            processor.input      = nlInput;
+            processor.inputDir   = nlInputDir;
+            processor.operation  = operation ?: @"detect-language";
+            processor.language   = nlLanguage;
+            processor.scheme     = nlScheme;
+            processor.unit       = nlTokenizerUnit;
+            processor.topk       = topk;
+            processor.word       = nlWord;
+            processor.wordA      = nlWordA;
+            processor.wordB      = nlWordB;
+            processor.similar    = nlSimilar;
+            processor.modelPath  = nlModelPath;
+            processor.output     = output;
+            processor.outputDir  = outputDir;
+            processor.merge      = merge;
+            processor.debug      = debug;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"av"]) {
+            AVProcessor *processor = [[AVProcessor alloc] init];
+            processor.video        = video;
+            processor.img          = img;
+            processor.operation    = operation ?: @"inspect";
+            processor.output       = output;
+            processor.outputDir    = outputDir;
+            processor.preset       = avPreset;
+            processor.timeStr      = avTime;
+            processor.timesStr     = avTimes;
+            processor.timeRangeStr = avTimeRange;
+            processor.metaKey      = avMetaKey;
+            processor.debug        = debug;
+            success = [processor runWithError:&error];
+
         } else {
-            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, svg, debug, audio\n",
+            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, svg, debug, audio, capture, nl, av\n",
                     subcommand.UTF8String);
             return 1;
         }
