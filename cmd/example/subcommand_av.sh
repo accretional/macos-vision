@@ -11,6 +11,12 @@ mkdir -p "$OUTPUT"
 
 VID="$VIDEO_DIR/kazoo_kid_who_are_you.mp4"
 
+run() {
+    local label="$1"; shift
+    echo "  RUN   $label"
+    "$@"
+}
+
 run_file() {
     local label="$1" file="$2"; shift 2
     if [ ! -f "$file" ]; then

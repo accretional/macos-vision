@@ -420,7 +420,9 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
                              userInfo:@{NSLocalizedDescriptionKey: @"Could not create export session"}];
         return NO;
     }
-    session.outputURL = [NSURL fileURLWithPath:self.output];
+    NSURL *outputURL = [NSURL fileURLWithPath:self.output];
+    [[NSFileManager defaultManager] removeItemAtURL:outputURL error:nil];
+    session.outputURL = outputURL;
     NSString *fileType = session.supportedFileTypes.firstObject;
     if (!fileType) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:9
@@ -515,9 +517,11 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
                              userInfo:@{NSLocalizedDescriptionKey: @"Could not create export session for composition"}];
         return NO;
     }
-    [[NSFileManager defaultManager] createDirectoryAtURL:[NSURL fileURLWithPath:self.output].URLByDeletingLastPathComponent
+    NSURL *compOutputURL = [NSURL fileURLWithPath:self.output];
+    [[NSFileManager defaultManager] createDirectoryAtURL:compOutputURL.URLByDeletingLastPathComponent
                                  withIntermediateDirectories:YES attributes:nil error:nil];
-    session.outputURL = [NSURL fileURLWithPath:self.output];
+    [[NSFileManager defaultManager] removeItemAtURL:compOutputURL error:nil];
+    session.outputURL = compOutputURL;
     session.outputFileType = session.supportedFileTypes.firstObject;
 
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
