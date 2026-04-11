@@ -23,47 +23,47 @@ run() {
 run "face-rectangles" "$IMG/bohemian_rhapsody.jpg" \
     "$BINARY" face --img "$IMG/bohemian_rhapsody.jpg" \
                    --operation face-rectangles \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT" 
+                   
 
 # ── face-landmarks ────────────────────────────────────────────────────────────
 run "face-landmarks" "$IMG/fred_yass.png" \
     "$BINARY" face --img "$IMG/fred_yass.png" \
                    --operation face-landmarks \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT" 
+                   
 
 # ── face-quality ──────────────────────────────────────────────────────────────
 run "face-quality" "$IMG/fred_yass.png" \
     "$BINARY" face --img "$IMG/fred_yass.png" \
                    --operation face-quality \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT" 
+                   
 
 # ── human-rectangles ──────────────────────────────────────────────────────────
 run "human-rectangles" "$IMG/spiderman.jpg" \
     "$BINARY" face --img "$IMG/spiderman.jpg" \
                    --operation human-rectangles \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT" 
+                   
 
 # ── body-pose ─────────────────────────────────────────────────────────────────
 run "body-pose" "$IMG/sad_pablo.png" \
     "$BINARY" face --img "$IMG/sad_pablo.png" \
                    --operation body-pose \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT" 
+                   
 
 # ── hand-pose ─────────────────────────────────────────────────────────────────
 run "hand-pose" "$IMG/spiderman.jpg" \
     "$BINARY" face --img "$IMG/spiderman.jpg" \
                    --operation hand-pose \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT" 
+                   
 
 # ── animal-pose ───────────────────────────────────────────────────────────────
 run "animal-pose" "$IMG/raccoon_cotton_candy.jpg" \
     "$BINARY" face --img "$IMG/raccoon_cotton_candy.jpg" \
                    --operation animal-pose \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT" 
+                   

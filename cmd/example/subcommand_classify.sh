@@ -29,22 +29,19 @@ run "classify" "$IMG/gorilla.jpg" \
 run "animals" "$IMG/cat_side_eye.jpg" \
     "$BINARY" classify --img "$IMG/cat_side_eye.jpg" \
                        --operation animals \
-                       --output "$OUTPUT" \
-                       --svg
+                       --output "$OUTPUT" 
 
 # ── rectangles ────────────────────────────────────────────────────────────────
 run "rectangles" "$IMG/document.jpg" \
     "$BINARY" classify --img "$IMG/document.jpg" \
                        --operation rectangles \
-                       --output "$OUTPUT" \
-                       --svg
+                       --output "$OUTPUT" 
 
 # ── horizon ───────────────────────────────────────────────────────────────────
 run "horizon" "$IMG/sad_pablo.png" \
     "$BINARY" classify --img "$IMG/sad_pablo.png" \
                        --operation horizon \
-                       --output "$OUTPUT" \
-                       --svg
+                       --output "$OUTPUT" 
 
 # ── contours (no SVG — count + aspect ratios only, no coordinates) ────────────
 run "contours" "$IMG/gorilla.jpg" \

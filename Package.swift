@@ -12,7 +12,6 @@ let package = Package(
             name: "macos-vision",
             path: "Sources",
             linkerSettings: [
-                .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", "Info.plist"]),
                 .linkedFramework("Cocoa"),
                 .linkedFramework("Vision"),
                 .linkedFramework("AVFoundation"),

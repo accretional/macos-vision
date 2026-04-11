@@ -5,7 +5,7 @@
 #import "face/main.h"
 #import "classify/main.h"
 #import "track/main.h"
-#import "svg/main.h"
+#import "svg/main.h"  // OverlayProcessor
 #import "audio/main.h"
 #import "capture/main.h"
 #import "nl/main.h"
@@ -21,12 +21,12 @@ static void printUsage(void) {
         "  classify  Scene/object classification and image analysis\n"
         "  segment   Image segmentation and saliency analysis\n"
         "  track     Video tracking and image registration\n"
-        "  svg       Overlay Vision JSON output as SVG shapes on the source image\n"
+        "  overlay   Overlay Vision JSON output as SVG shapes on the source image\n"
         "  debug     Print image metadata (dimensions, file size)\n"
         "  audio     Audio inference: transcription, classification, Shazam, pitch, noise\n"
         "  capture   Capture from screen, camera, or microphone; list capture devices\n"
         "  nl        NaturalLanguage: language ID, tokenize, tag, embeddings, text classify\n"
-        "  av        AVFoundation: inspect video/audio, metadata, thumbnails, export\n"
+        "  av        AVFoundation: inspect, metadata, thumbnails, export, compose, waveform, tts\n"
         "\n"
         "COMMON OPTIONS:\n"
         "  --img <path>          Path to a single image file\n"
@@ -45,14 +45,10 @@ static void printUsage(void) {
         "FACE OPTIONS:\n"
         "  --operation <op>      Operation: face-rectangles (default), face-landmarks, face-quality,\n"
         "                          human-rectangles, body-pose, hand-pose, animal-pose\n"
-        "  --svg                 Also produce an SVG overlay for each output JSON\n"
-        "  --show-labels         Show text labels in the SVG overlay (default: off)\n"
         "\n"
         "CLASSIFY OPTIONS:\n"
         "  --operation <op>      Operation: classify (default), animals, rectangles, horizon,\n"
         "                          contours, aesthetics, feature-print\n"
-        "  --svg                 Also produce an SVG overlay for each output JSON\n"
-        "  --show-labels         Show text labels in the SVG overlay (default: off)\n"
         "\n"
         "SEGMENT OPTIONS:\n"
         "  --operation <op>      Operation: foreground-mask (default), person-segment,\n"
@@ -63,11 +59,11 @@ static void printUsage(void) {
         "  --operation <op>      Operation: homographic (default), translational,\n"
         "                          optical-flow, trajectories\n"
         "\n"
-        "SVG OPTIONS:\n"
+        "OVERLAY OPTIONS:\n"
         "  --json <path>         Path to Vision JSON file (required)\n"
         "  --img <path>          Override source image (optional; falls back to info.filepath in JSON)\n"
         "  --output <path>       Output directory for the SVG file\n"
-        "  --show-labels         Show text labels on shapes (default: off)\n"
+        "  --show-labels         boundingBox: name + confidence; landmarks: group name\n"
         "\n"
         "AUDIO OPTIONS:\n"
         "  --audio <path>        Path to a single audio file\n"
@@ -106,13 +102,17 @@ static void printUsage(void) {
         "  --video <path>        Video or audio-visual media file\n"
         "  --img <path>          Still image (thumbnail operation)\n"
         "  --operation <op>      inspect | tracks | metadata | thumbnail | export |\n"
-        "                          export-audio | list-presets\n"
-        "  --preset <name>       export: low | medium | high | hevc-1080p | hevc-4k |\n"
+        "                          export-audio | list-presets | compose | waveform | tts\n"
+        "  --preset <name>       export/compose: low | medium | high | hevc-1080p | hevc-4k |\n"
         "                          prores-422 | prores-4444 | m4a | passthrough\n"
         "  --time <seconds>      thumbnail: single frame time (default 0)\n"
         "  --times <t1,t2,...>   thumbnail: multiple frames\n"
         "  --time-range <s,d>    export: start seconds and duration\n"
         "  --key <id>            metadata: filter AVMetadataItem by identifier\n"
+        "  --videos <p1,p2,...>  compose: comma-separated input files to concatenate\n"
+        "  --text <str>          tts: inline text to synthesize\n"
+        "  --input <file>        tts: text file to synthesize\n"
+        "  --voice <id>          tts: AVSpeechSynthesisVoice identifier (optional)\n"
     );
 }
 
@@ -137,7 +137,6 @@ int main(int argc, const char * argv[]) {
         BOOL lang             = NO;
         BOOL merge            = NO;
         BOOL showLabels       = NO;
-        BOOL svgOutput        = NO;
         NSString *recLangs    = nil;
         NSString *boxesFormat = @"png";
         NSString *operation   = nil;
@@ -170,6 +169,8 @@ int main(int argc, const char * argv[]) {
         NSString *avTimes       = nil;
         NSString *avTimeRange   = nil;
         NSString *avMetaKey     = nil;
+        NSString *avVideos      = nil;
+        NSString *avVoice       = nil;
 
         for (NSInteger i = 1; i < (NSInteger)args.count; i++) {
             NSString *arg = args[i];
@@ -199,8 +200,6 @@ int main(int argc, const char * argv[]) {
                 debug = YES;
             } else if ([arg isEqualToString:@"--show-labels"]) {
                 showLabels = YES;
-            } else if ([arg isEqualToString:@"--svg"]) {
-                svgOutput = YES;
             } else if ([arg isEqualToString:@"--lang"]) {
                 lang = YES;
             } else if ([arg isEqualToString:@"--merge"]) {
@@ -253,6 +252,10 @@ int main(int argc, const char * argv[]) {
                 avTimeRange = args[++i];
             } else if ([arg isEqualToString:@"--key"] && i + 1 < (NSInteger)args.count) {
                 avMetaKey = args[++i];
+            } else if ([arg isEqualToString:@"--videos"] && i + 1 < (NSInteger)args.count) {
+                avVideos = args[++i];
+            } else if ([arg isEqualToString:@"--voice"] && i + 1 < (NSInteger)args.count) {
+                avVoice = args[++i];
             } else if (![arg hasPrefix:@"--"] && subcommand == nil) {
                 subcommand = arg;
             } else {
@@ -319,8 +322,6 @@ int main(int argc, const char * argv[]) {
             processor.imgDir      = imgDir;
             processor.outputDir   = outputDir;
             processor.debug       = debug;
-            processor.svg         = svgOutput;
-            processor.svgLabels   = showLabels;
             processor.boxesFormat = boxesFormat;
             processor.operation   = operation ?: @"face-rectangles";
             success = [processor runWithError:&error];
@@ -332,8 +333,6 @@ int main(int argc, const char * argv[]) {
             processor.imgDir      = imgDir;
             processor.outputDir   = outputDir;
             processor.debug       = debug;
-            processor.svg         = svgOutput;
-            processor.svgLabels   = showLabels;
             processor.boxesFormat = boxesFormat;
             processor.operation   = operation ?: @"classify";
             success = [processor runWithError:&error];
@@ -347,8 +346,8 @@ int main(int argc, const char * argv[]) {
             processor.operation  = operation ?: @"homographic";
             success = [processor runWithError:&error];
 
-        } else if ([subcommand isEqualToString:@"svg"]) {
-            SVGProcessor *processor = [[SVGProcessor alloc] init];
+        } else if ([subcommand isEqualToString:@"overlay"]) {
+            OverlayProcessor *processor = [[OverlayProcessor alloc] init];
             processor.img        = img;
             processor.jsonPath   = jsonPath;
             processor.output     = output;
@@ -413,11 +412,15 @@ int main(int argc, const char * argv[]) {
             processor.timesStr     = avTimes;
             processor.timeRangeStr = avTimeRange;
             processor.metaKey      = avMetaKey;
+            processor.videosStr    = avVideos;
+            processor.text         = nlText;
+            processor.inputFile    = nlInput;
+            processor.voice        = avVoice;
             processor.debug        = debug;
             success = [processor runWithError:&error];
 
         } else {
-            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, svg, debug, audio, capture, nl, av\n",
+            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, overlay, debug, audio, capture, nl, av\n",
                     subcommand.UTF8String);
             return 1;
         }

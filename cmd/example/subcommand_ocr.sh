@@ -19,21 +19,18 @@ run() {
     "$@"
 }
 
-run_ocr_svg() {
-    local label="$1" img="$2" json="$3"
+run_ocr() {
+    local label="$1" img="$2"
     run "$label" "$img" \
         "$BINARY" ocr --img "$img" --output "$OUTPUT"
-    if [ -f "$json" ]; then
-        "$BINARY" svg --json "$json" --img "$img" --output "$OUTPUT"
-    fi
 }
 
 # ── printed text ──────────────────────────────────────────────────────────────
-run_ocr_svg "ocr-printed" \
+run_ocr "ocr-printed" \
     "$IMG/text_printed.jpg" \
     "$OUTPUT/text_printed.json"
 
 # ── handwritten text ──────────────────────────────────────────────────────────
-run_ocr_svg "ocr-handwritten" \
+run_ocr "ocr-handwritten" \
     "$IMG/handwriting.png" \
     "$OUTPUT/handwriting.json"

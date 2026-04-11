@@ -1,5 +1,4 @@
 #import "main.h"
-#import "../svg/main.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 
@@ -59,10 +58,7 @@ static NSString *extensionForFormat(NSString *fmt) {
 @implementation ClassifyProcessor
 
 - (instancetype)init {
-    if ((self = [super init])) {
-        _svgLabels = NO;
-    }
-    return self;
+    return [super init];
 }
 
 // ── public entry point ────────────────────────────────────────────────────────
@@ -435,13 +431,6 @@ static NSString *extensionForFormat(NSString *fmt) {
         NSString *path = [outputDir stringByAppendingPathComponent:filename];
         if (![str writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:error]) return NO;
         printf("Saved: %s\n", path.UTF8String);
-        if (self.svg) {
-            SVGProcessor *svgProc = [[SVGProcessor alloc] init];
-            svgProc.jsonPath   = path;
-            svgProc.output     = outputDir;
-            svgProc.showLabels = self.svgLabels;
-            [svgProc runWithError:nil];
-        }
     } else {
         printf("%s\n", str.UTF8String);
     }

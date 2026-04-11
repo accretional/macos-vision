@@ -14,6 +14,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *timesStr;
 @property (nonatomic, copy, nullable) NSString *timeRangeStr;
 @property (nonatomic, copy, nullable) NSString *metaKey;
+@property (nonatomic, copy, nullable) NSString *videosStr;   // comma-sep paths for compose
+@property (nonatomic, copy, nullable) NSString *text;        // inline text for tts
+@property (nonatomic, copy, nullable) NSString *voice;       // voice identifier for tts
+@property (nonatomic, copy, nullable) NSString *inputFile;   // --input file for tts
 @property (nonatomic, assign) BOOL debug;
 
 - (BOOL)runWithError:(NSError **)error;

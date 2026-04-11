@@ -15,7 +15,13 @@ typedef NS_ENUM(NSInteger, AVProcessorErrorCode) {
     AVProcessorErrorPresetIncompat  = 8,
     AVProcessorErrorSessionCreate   = 9,
     AVProcessorErrorNoFileTypes     = 10,
-    AVProcessorErrorExportFailed    = 11,
+    AVProcessorErrorExportFailed     = 11,
+    AVProcessorErrorComposeEmpty     = 12,
+    AVProcessorErrorComposeFailed    = 13,
+    AVProcessorErrorNoAudioTrack     = 14,
+    AVProcessorErrorReaderFailed     = 15,
+    AVProcessorErrorTTSNoText        = 16,
+    AVProcessorErrorTTSFailed        = 17,
 };
 
 static void MPrintJSON(id obj) {
@@ -109,7 +115,8 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
 }
 
 - (BOOL)runWithError:(NSError **)error {
-    NSArray *valid = @[@"inspect", @"tracks", @"metadata", @"thumbnail", @"export", @"export-audio", @"list-presets"];
+    NSArray *valid = @[@"inspect", @"tracks", @"metadata", @"thumbnail", @"export", @"export-audio",
+                       @"list-presets", @"compose", @"waveform", @"tts"];
     if (![valid containsObject:self.operation]) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:1
                              userInfo:@{NSLocalizedDescriptionKey:
@@ -119,6 +126,12 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
 
     if ([self.operation isEqualToString:@"list-presets"]) {
         return [self runListPresets:error];
+    }
+    if ([self.operation isEqualToString:@"compose"]) {
+        return [self runCompose:error];
+    }
+    if ([self.operation isEqualToString:@"tts"]) {
+        return [self runTTS:error];
     }
 
     NSURL *mediaURL = nil;
@@ -155,6 +168,9 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
     }
     if ([self.operation isEqualToString:@"export"] || [self.operation isEqualToString:@"export-audio"]) {
         return [self runExport:asset error:error];
+    }
+    if ([self.operation isEqualToString:@"waveform"]) {
+        return [self runWaveform:asset error:error];
     }
 
     return YES;
@@ -281,6 +297,8 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
 
     AVAssetImageGenerator *gen = [[AVAssetImageGenerator alloc] initWithAsset:asset];
     gen.appliesPreferredTrackTransform = YES;
+    gen.requestedTimeToleranceBefore = kCMTimeZero;
+    gen.requestedTimeToleranceAfter = kCMTimeZero;
 
     NSMutableArray *times = [NSMutableArray array];
     if (self.timesStr.length) {
@@ -445,9 +463,288 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
     return [self emit:out error:error];
 }
 
+// ── compose ───────────────────────────────────────────────────────────────────
+
+- (BOOL)runCompose:(NSError **)error {
+    if (!self.videosStr.length) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorComposeEmpty
+                             userInfo:@{NSLocalizedDescriptionKey: @"compose requires --videos <path1,path2,...>"}];
+        return NO;
+    }
+    if (!self.output.length) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
+                             userInfo:@{NSLocalizedDescriptionKey: @"compose requires --output"}];
+        return NO;
+    }
+
+    NSDate *t0 = self.debug ? [NSDate date] : nil;
+
+    NSArray<NSString *> *parts = [self.videosStr componentsSeparatedByString:@","];
+    NSMutableArray<AVURLAsset *> *assets = [NSMutableArray array];
+    for (NSString *raw in parts) {
+        NSString *p = [raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (!p.length) continue;
+        AVURLAsset *a = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:p]
+                                           options:@{ AVURLAssetPreferPreciseDurationAndTimingKey: @YES }];
+        MWaitAssetKeys(a, @[@"tracks", @"duration"]);
+        [assets addObject:a];
+    }
+
+    if (assets.count == 0) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorComposeEmpty
+                             userInfo:@{NSLocalizedDescriptionKey: @"No valid paths found in --videos"}];
+        return NO;
+    }
+
+    AVMutableComposition *comp = [AVMutableComposition composition];
+    CMTime insertAt = kCMTimeZero;
+    for (AVURLAsset *asset in assets) {
+        CMTimeRange range = CMTimeRangeMake(kCMTimeZero, asset.duration);
+        NSError *insertErr = nil;
+        if (![comp insertTimeRange:range ofAsset:asset atTime:insertAt error:&insertErr]) {
+            if (error) *error = insertErr;
+            return NO;
+        }
+        insertAt = CMTimeAdd(insertAt, asset.duration);
+    }
+
+    NSString *presetConst = MPresetConstant(self.preset ?: @"medium") ?: AVAssetExportPresetMediumQuality;
+    AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:comp presetName:presetConst];
+    if (!session) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorSessionCreate
+                             userInfo:@{NSLocalizedDescriptionKey: @"Could not create export session for composition"}];
+        return NO;
+    }
+    [[NSFileManager defaultManager] createDirectoryAtURL:[NSURL fileURLWithPath:self.output].URLByDeletingLastPathComponent
+                                 withIntermediateDirectories:YES attributes:nil error:nil];
+    session.outputURL = [NSURL fileURLWithPath:self.output];
+    session.outputFileType = session.supportedFileTypes.firstObject;
+
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    __block BOOL ok = YES;
+    [session exportAsynchronouslyWithCompletionHandler:^{
+        if (session.status != AVAssetExportSessionStatusCompleted) ok = NO;
+        dispatch_semaphore_signal(sem);
+    }];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 3600 * NSEC_PER_SEC));
+
+    if (!ok) {
+        if (error) *error = session.error ?: [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorComposeFailed
+                                               userInfo:@{NSLocalizedDescriptionKey: @"Composition export failed"}];
+        return NO;
+    }
+
+    NSMutableDictionary *out = [@{
+        @"operation": @"compose",
+        @"output": self.output,
+        @"inputCount": @(assets.count),
+        @"durationSeconds": @(CMTimeGetSeconds(comp.duration)),
+    } mutableCopy];
+    if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    return [self emit:out error:error];
+}
+
+// ── waveform ──────────────────────────────────────────────────────────────────
+
+- (BOOL)runWaveform:(AVURLAsset *)asset error:(NSError **)error {
+    NSDate *t0 = self.debug ? [NSDate date] : nil;
+    MWaitAssetKeys(asset, @[@"tracks"]);
+
+    NSArray<AVAssetTrack *> *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+    if (audioTracks.count == 0) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorNoAudioTrack
+                             userInfo:@{NSLocalizedDescriptionKey: @"No audio tracks found in asset"}];
+        return NO;
+    }
+
+    AVAssetTrack *track = audioTracks.firstObject;
+    NSUInteger channelCount = 1;
+    double sampleRate = 44100.0;
+    if (track.formatDescriptions.count > 0) {
+        CMFormatDescriptionRef fmt = (__bridge CMFormatDescriptionRef)track.formatDescriptions.firstObject;
+        const AudioStreamBasicDescription *asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt);
+        if (asbd) {
+            channelCount = (NSUInteger)asbd->mChannelsPerFrame;
+            sampleRate = asbd->mSampleRate;
+        }
+    }
+
+    NSError *readerErr = nil;
+    AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&readerErr];
+    if (!reader) { if (error) *error = readerErr; return NO; }
+
+    NSDictionary *outputSettings = @{
+        AVFormatIDKey: @(kAudioFormatLinearPCM),
+        AVLinearPCMBitDepthKey: @16,
+        AVLinearPCMIsFloatKey: @NO,
+        AVLinearPCMIsBigEndianKey: @NO,
+        AVLinearPCMIsNonInterleaved: @NO,
+    };
+    AVAssetReaderTrackOutput *trackOutput =
+        [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outputSettings];
+    [reader addOutput:trackOutput];
+
+    if (![reader startReading]) {
+        if (error) *error = reader.error;
+        return NO;
+    }
+
+    NSMutableData *rawData = [NSMutableData data];
+    while (reader.status == AVAssetReaderStatusReading) {
+        CMSampleBufferRef sampleBuf = [trackOutput copyNextSampleBuffer];
+        if (!sampleBuf) break;
+        CMBlockBufferRef block = CMSampleBufferGetDataBuffer(sampleBuf);
+        if (block) {
+            size_t len = CMBlockBufferGetDataLength(block);
+            NSMutableData *chunk = [NSMutableData dataWithLength:len];
+            CMBlockBufferCopyDataBytes(block, 0, len, chunk.mutableBytes);
+            [rawData appendData:chunk];
+        }
+        CFRelease(sampleBuf);
+    }
+    if (reader.status == AVAssetReaderStatusFailed) {
+        if (error) *error = reader.error;
+        return NO;
+    }
+
+    const NSInteger TARGET_POINTS = 1000;
+    NSUInteger totalFrames = rawData.length / (sizeof(int16_t) * channelCount);
+    NSInteger stride = MAX(1, (NSInteger)(totalFrames / TARGET_POINTS));
+    int16_t *samples = (int16_t *)rawData.bytes;
+
+    NSMutableArray *channels = [NSMutableArray array];
+    for (NSUInteger ch = 0; ch < channelCount; ch++) {
+        [channels addObject:[NSMutableArray array]];
+    }
+    for (NSUInteger frame = 0; frame < totalFrames; frame += (NSUInteger)stride) {
+        for (NSUInteger ch = 0; ch < channelCount; ch++) {
+            int16_t s = samples[frame * channelCount + ch];
+            [channels[ch] addObject:@(s / 32768.0)];
+        }
+    }
+
+    NSMutableDictionary *out = [@{
+        @"operation": @"waveform",
+        @"channels": channels,
+        @"channelCount": @(channelCount),
+        @"sampleRate": @(sampleRate),
+        @"totalFrames": @(totalFrames),
+        @"samplesPerChannel": @([(NSArray *)channels[0] count]),
+    } mutableCopy];
+    if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    return [self emit:out error:error];
+}
+
+// ── tts ───────────────────────────────────────────────────────────────────────
+
+- (BOOL)runTTS:(NSError **)error {
+    NSString *txt = self.text;
+    if (!txt.length && self.inputFile.length) {
+        NSError *readErr = nil;
+        txt = [NSString stringWithContentsOfFile:self.inputFile encoding:NSUTF8StringEncoding error:&readErr];
+        if (!txt) { if (error) *error = readErr; return NO; }
+    }
+    if (!txt.length) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorTTSNoText
+                             userInfo:@{NSLocalizedDescriptionKey: @"tts requires --text or --input"}];
+        return NO;
+    }
+    if (!self.output.length) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
+                             userInfo:@{NSLocalizedDescriptionKey: @"tts requires --output"}];
+        return NO;
+    }
+
+    NSDate *t0 = self.debug ? [NSDate date] : nil;
+
+    AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:txt];
+    if (self.voice.length) {
+        AVSpeechSynthesisVoice *v = [AVSpeechSynthesisVoice voiceWithIdentifier:self.voice];
+        if (v) utterance.voice = v;
+    }
+
+    AVSpeechSynthesizer *synth = [[AVSpeechSynthesizer alloc] init];
+    __block AVAudioFormat *outputFormat = nil;
+    __block NSMutableArray<AVAudioPCMBuffer *> *buffers = [NSMutableArray array];
+    __block BOOL done = NO;
+
+    [synth writeUtterance:utterance toBufferCallback:^(AVAudioBuffer *buffer) {
+        if (!buffer) { done = YES; return; }
+        if ([buffer isKindOfClass:[AVAudioPCMBuffer class]]) {
+            AVAudioPCMBuffer *pcm = (AVAudioPCMBuffer *)buffer;
+            if (!outputFormat) outputFormat = pcm.format;
+            if (pcm.frameLength > 0) [buffers addObject:pcm];
+            else done = YES;  // zero-length frame signals end
+        }
+    }];
+
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:300.0];
+    while (!done && [deadline timeIntervalSinceNow] > 0) {
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    }
+
+    if (!outputFormat || buffers.count == 0) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorTTSFailed
+                             userInfo:@{NSLocalizedDescriptionKey: @"TTS synthesis produced no audio"}];
+        return NO;
+    }
+
+    NSURL *outURL = [NSURL fileURLWithPath:self.output];
+    [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
+                                 withIntermediateDirectories:YES attributes:nil error:nil];
+
+    NSString *ext = self.output.pathExtension.lowercaseString;
+    NSDictionary *settings;
+    if ([ext isEqualToString:@"caf"] || [ext isEqualToString:@"aiff"] ||
+        [ext isEqualToString:@"aif"] || [ext isEqualToString:@"wav"]) {
+        settings = @{
+            AVFormatIDKey: @(kAudioFormatLinearPCM),
+            AVSampleRateKey: @(outputFormat.sampleRate),
+            AVNumberOfChannelsKey: @(outputFormat.channelCount),
+            AVLinearPCMBitDepthKey: @16,
+            AVLinearPCMIsFloatKey: @NO,
+            AVLinearPCMIsBigEndianKey: @NO,
+        };
+    } else {
+        settings = @{
+            AVFormatIDKey: @(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: @(outputFormat.sampleRate),
+            AVNumberOfChannelsKey: @(outputFormat.channelCount),
+            AVEncoderBitRateKey: @(128000),
+        };
+    }
+
+    NSError *fileErr = nil;
+    AVAudioFile *file = [[AVAudioFile alloc] initForWriting:outURL settings:settings error:&fileErr];
+    if (!file) { if (error) *error = fileErr; return NO; }
+
+    for (AVAudioPCMBuffer *buf in buffers) {
+        NSError *writeErr = nil;
+        if (![file writeFromBuffer:buf error:&writeErr]) {
+            if (error) *error = writeErr;
+            return NO;
+        }
+    }
+
+    NSMutableDictionary *out = [@{
+        @"operation": @"tts",
+        @"output": self.output,
+        @"characterCount": @(txt.length),
+    } mutableCopy];
+    if (self.voice.length) out[@"voice"] = self.voice;
+    if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    return [self emit:out error:error];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 - (BOOL)emit:(NSDictionary *)obj error:(NSError **)error {
-    // export/export-audio: --output is the media file, JSON goes alongside it
-    BOOL isExport = [self.operation isEqualToString:@"export"] || [self.operation isEqualToString:@"export-audio"];
+    // For operations where --output is a media file, JSON goes alongside it
+    BOOL isExport = [self.operation isEqualToString:@"export"] ||
+                    [self.operation isEqualToString:@"export-audio"] ||
+                    [self.operation isEqualToString:@"compose"] ||
+                    [self.operation isEqualToString:@"tts"];
     if (isExport && self.output) {
         NSString *jsonPath = [[self.output stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
         return MWriteJSON(obj, [NSURL fileURLWithPath:jsonPath], error);
