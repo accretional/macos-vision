@@ -8,7 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *img;
 @property (nonatomic, copy) NSString *operation;
 @property (nonatomic, copy, nullable) NSString *output;
-@property (nonatomic, copy, nullable) NSString *outputDir;
+@property (nonatomic, copy, nullable) NSString *artifactsDir;
 @property (nonatomic, copy, nullable) NSString *preset;
 @property (nonatomic, copy, nullable) NSString *timeStr;
 @property (nonatomic, copy, nullable) NSString *timesStr;

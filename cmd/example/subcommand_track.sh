@@ -2,13 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="$ROOT/.build/debug/macos-vision"
-VID="$ROOT/sample_data/input/videos"
-FRAMES="$VID/selective_attention_test_frames"
-VIDEO="$VID/selective_attention_test.mp4"
-OUTPUT="$ROOT/sample_data/output/track"
 
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"; export ROOT
+eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'export {k}="{root}/{v}"') for k,v in json.load(open(f)).items()]" "$ROOT" "$SCRIPT_DIR/data_files.json")"
+
+OUTPUT="$ROOT/sample_data/output/track"
 mkdir -p "$OUTPUT"
 
 run_seq() {
@@ -32,26 +30,27 @@ run_vid() {
 }
 
 # ── homographic ───────────────────────────────────────────────────────────────
-run_seq "homographic" "$FRAMES" \
-    "$BINARY" track --img-dir "$FRAMES" \
+run_seq "homographic" "$EXAMPLE_TRACK_FRAMES" \
+    "$BINARY" track --input "$EXAMPLE_TRACK_FRAMES" \
                     --operation homographic \
                     --output "$OUTPUT"
 
 # ── translational ─────────────────────────────────────────────────────────────
-run_seq "translational" "$FRAMES" \
-    "$BINARY" track --img-dir "$FRAMES" \
+run_seq "translational" "$EXAMPLE_TRACK_FRAMES" \
+    "$BINARY" track --input "$EXAMPLE_TRACK_FRAMES" \
                     --operation translational \
                     --output "$OUTPUT"
 
 # ── optical-flow ──────────────────────────────────────────────────────────────
-run_seq "optical-flow" "$FRAMES" \
-    "$BINARY" track --img-dir "$FRAMES" \
+run_seq "optical-flow" "$EXAMPLE_TRACK_FRAMES" \
+    "$BINARY" track --input "$EXAMPLE_TRACK_FRAMES" \
                     --operation optical-flow \
-                    --output "$OUTPUT/optical-flow"
+                    --artifacts-dir "$OUTPUT/optical-flow" \
+                    --output "$OUTPUT"
 
 # ── trajectories (video) ──────────────────────────────────────────────────────
-run_vid "trajectories-video" "$VIDEO" \
-    "$BINARY" track --video "$VIDEO" \
+run_vid "trajectories-video" "$EXAMPLE_TRACK_VIDEO" \
+    "$BINARY" track --input "$EXAMPLE_TRACK_VIDEO" \
                     --operation trajectories \
                     --output "$OUTPUT"
 
@@ -61,11 +60,11 @@ if [ -f "$OUTPUT/track_trajectories.json" ]; then
 import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 with open(src) as f:
-    d = json.load(f)
-tr = d.get("trajectories") or []
-d["trajectories"] = tr[:25]
+    doc = json.load(f)
+inner = doc.get("result") if isinstance(doc.get("result"), dict) else doc
+tr = inner.get("trajectories") or []
+inner["trajectories"] = tr[:25]
 with open(dst, "w") as o:
-    json.dump(d, o)
-print("  WROTE track_trajectories_preview.json (" + str(len(d["trajectories"])) + " trajectories)")
+    json.dump(inner, o)
 PY
 fi

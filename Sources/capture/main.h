@@ -5,11 +5,15 @@ NS_ASSUME_NONNULL_BEGIN
 /// Operations: screenshot | camera | mic | list-devices
 @interface CaptureProcessor : NSObject
 
-@property (nonatomic, copy) NSString *operation;           // screenshot | camera | mic | list-devices
-@property (nonatomic, copy, nullable) NSString *output;    // output path for captured media file
-@property (nonatomic, copy, nullable) NSString *outputDir; // output directory for media + JSON
-@property (nonatomic, assign) NSInteger displayIndex;      // for screenshot (default 0)
-@property (nonatomic, assign) BOOL debug;                  // emit processing_ms
+@property (nonatomic, copy) NSString *operation;
+/// Optional explicit path for captured media (PNG, JPG, M4A).
+@property (nonatomic, copy, nullable) NSString *mediaOutput;
+/// Directory used when `mediaOutput` is not set (default: current working directory).
+@property (nonatomic, copy, nullable) NSString *artifactsDir;
+/// JSON envelope path, or stdout when omitted.
+@property (nonatomic, copy, nullable) NSString *jsonOutput;
+@property (nonatomic, assign) NSInteger displayIndex;
+@property (nonatomic, assign) BOOL debug;
 
 - (BOOL)runWithError:(NSError **)error;
 

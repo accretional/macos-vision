@@ -1,4 +1,5 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 #import <CoreImage/CoreImage.h>
@@ -20,43 +21,38 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
 
 - (BOOL)runWithError:(NSError **)error {
     NSString *op = self.operation.length ? self.operation : @"foreground-mask";
-
-    if (self.img) {
-        return [self processImage:self.img outputDir:self.output operation:op error:error];
-    } else if (self.imgDir) {
-        return [self processBatch:self.imgDir outputDir:self.outputDir operation:op error:error];
-    } else {
+    if (!self.inputPath.length) {
         if (error) {
             *error = [NSError errorWithDomain:SegmentErrorDomain
                                          code:SegmentErrorMissingInput
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Either --img or --img-dir must be provided"}];
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
         }
         return NO;
     }
+    return [self processImage:self.inputPath operation:op error:error];
 }
 
-// ── single image ──────────────────────────────────────────────────────────────
-
-- (BOOL)processImage:(NSString *)imagePath outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
+- (BOOL)processImage:(NSString *)imagePath operation:(NSString *)op error:(NSError **)error {
     NSFileManager *fm = [NSFileManager defaultManager];
-    if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-        if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) {
+    if (self.artifactsDir.length && ![fm fileExistsAtPath:self.artifactsDir]) {
+        if (![fm createDirectoryAtPath:self.artifactsDir withIntermediateDirectories:YES attributes:nil error:error]) {
             return NO;
         }
     }
 
     NSString *base = [[imagePath lastPathComponent] stringByDeletingPathExtension];
-
+    NSMutableArray<NSDictionary *> *artifactPaths = [NSMutableArray array];
+    BOOL ok = NO;
     if ([op isEqualToString:@"foreground-mask"]) {
-        return [self runForegroundMask:imagePath base:base outputDir:outputDir error:error];
+        ok = [self runForegroundMask:imagePath base:base artifactPaths:artifactPaths error:error];
     } else if ([op isEqualToString:@"person-mask"]) {
-        return [self runPersonMask:imagePath base:base outputDir:outputDir error:error];
+        ok = [self runPersonMask:imagePath base:base artifactPaths:artifactPaths error:error];
     } else if ([op isEqualToString:@"person-segment"]) {
-        return [self runPersonSegment:imagePath base:base outputDir:outputDir error:error];
+        ok = [self runPersonSegment:imagePath base:base artifactPaths:artifactPaths error:error];
     } else if ([op isEqualToString:@"attention-saliency"]) {
-        return [self runAttentionSaliency:imagePath base:base outputDir:outputDir error:error];
+        ok = [self runAttentionSaliency:imagePath base:base artifactPaths:artifactPaths error:error];
     } else if ([op isEqualToString:@"objectness-saliency"]) {
-        return [self runObjectnessSaliency:imagePath base:base outputDir:outputDir error:error];
+        ok = [self runObjectnessSaliency:imagePath base:base artifactPaths:artifactPaths error:error];
     } else {
         if (error) {
             *error = [NSError errorWithDomain:SegmentErrorDomain
@@ -66,38 +62,15 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
         }
         return NO;
     }
-}
-
-// ── batch mode ────────────────────────────────────────────────────────────────
-
-- (BOOL)processBatch:(NSString *)imgDir outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-        if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) {
-            return NO;
-        }
-    }
-
-    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:imgDir];
-    NSMutableArray<NSString *> *imageFiles = [NSMutableArray array];
-    NSString *filePath;
-    while ((filePath = [enumerator nextObject])) {
-        if ([self isImageFile:filePath]) {
-            [imageFiles addObject:filePath];
-        }
-    }
-    [imageFiles sortUsingSelector:@selector(compare:)];
-
-    for (NSString *relativePath in imageFiles) {
-        NSString *fullPath = [imgDir stringByAppendingPathComponent:relativePath];
-        if (![self processImage:fullPath outputDir:outputDir operation:op error:error]) return NO;
-    }
-    return YES;
+    if (!ok) return NO;
+    NSDictionary *result = @{ @"operation": op, @"artifacts": artifactPaths };
+    NSDictionary *envelope = MVMakeEnvelope(@"segment", op, self.inputPath, result);
+    return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
 // ── VNGenerateForegroundInstanceMaskRequest (macOS 14+) ───────────────────────
 
-- (BOOL)runForegroundMask:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runForegroundMask:(NSString *)imagePath base:(NSString *)base artifactPaths:(NSMutableArray<NSDictionary *> *)artifactPaths error:(NSError **)error {
     if (@available(macOS 14.0, *)) {
         CGImageRef cgImage = [self loadCGImage:imagePath error:error];
         if (!cgImage) return NO;
@@ -129,10 +102,10 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
             return NO;
         }
 
-        NSString *outPath = [self outputPathForBase:base suffix:@"foreground" outputDir:outputDir inputPath:imagePath];
+        NSString *outPath = [self outputPathForBase:base suffix:@"foreground" inputPath:imagePath];
         BOOL ok = [self savePixelBuffer:pixelBuffer toPath:outPath error:error];
         CVPixelBufferRelease(pixelBuffer);
-        if (ok) printf("Saved: %s\n", outPath.UTF8String);
+        if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"foreground_mask")];
         return ok;
     } else {
         if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorUnsupportedOS
@@ -143,7 +116,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
 
 // ── VNGeneratePersonInstanceMaskRequest (macOS 14+) ───────────────────────────
 
-- (BOOL)runPersonMask:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runPersonMask:(NSString *)imagePath base:(NSString *)base artifactPaths:(NSMutableArray<NSDictionary *> *)artifactPaths error:(NSError **)error {
     if (@available(macOS 14.0, *)) {
         CGImageRef cgImage = [self loadCGImage:imagePath error:error];
         if (!cgImage) return NO;
@@ -181,10 +154,10 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
                 return;
             }
             NSString *suffix = [NSString stringWithFormat:@"person_%lu", (unsigned long)idx];
-            NSString *outPath = [self outputPathForBase:base suffix:suffix outputDir:outputDir inputPath:imagePath];
+            NSString *outPath = [self outputPathForBase:base suffix:suffix inputPath:imagePath];
             NSError *saveError = nil;
             if ([self savePixelBuffer:pb toPath:outPath error:&saveError]) {
-                printf("Saved: %s\n", outPath.UTF8String);
+                [artifactPaths addObject:MVArtifactEntry(outPath, @"person_mask")];
                 idx++;
             } else {
                 blockError = saveError;
@@ -204,7 +177,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
 
 // ── VNGeneratePersonSegmentationRequest (macOS 12+) ───────────────────────────
 
-- (BOOL)runPersonSegment:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runPersonSegment:(NSString *)imagePath base:(NSString *)base artifactPaths:(NSMutableArray<NSDictionary *> *)artifactPaths error:(NSError **)error {
     if (@available(macOS 12.0, *)) {
         CGImageRef cgImage = [self loadCGImage:imagePath error:error];
         if (!cgImage) return NO;
@@ -244,9 +217,9 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
         [blend setValue:mask      forKey:kCIInputMaskImageKey];
 
         CIImage *result = blend.outputImage;
-        NSString *outPath = [self outputPathForBase:base suffix:@"person_segment" outputDir:outputDir inputPath:imagePath];
+        NSString *outPath = [self outputPathForBase:base suffix:@"person_segment" inputPath:imagePath];
         BOOL ok = [self saveCIImage:result toPath:outPath error:error];
-        if (ok) printf("Saved: %s\n", outPath.UTF8String);
+        if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"person_segment")];
         return ok;
     } else {
         if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorUnsupportedOS
@@ -257,7 +230,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
 
 // ── VNGenerateAttentionBasedSaliencyImageRequest (macOS 10.15+) ───────────────
 
-- (BOOL)runAttentionSaliency:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runAttentionSaliency:(NSString *)imagePath base:(NSString *)base artifactPaths:(NSMutableArray<NSDictionary *> *)artifactPaths error:(NSError **)error {
     CGImageRef cgImage = [self loadCGImage:imagePath error:error];
     if (!cgImage) return NO;
 
@@ -277,15 +250,15 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
     }
 
     CIImage *heatmap = [CIImage imageWithCVPixelBuffer:obs.pixelBuffer];
-    NSString *outPath = [self outputPathForBase:base suffix:@"attention_saliency" outputDir:outputDir inputPath:imagePath];
+    NSString *outPath = [self outputPathForBase:base suffix:@"attention_saliency" inputPath:imagePath];
     BOOL ok = [self saveCIImage:heatmap toPath:outPath error:error];
-    if (ok) printf("Saved: %s\n", outPath.UTF8String);
+    if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"attention_saliency")];
     return ok;
 }
 
 // ── VNGenerateObjectnessBasedSaliencyImageRequest (macOS 10.15+) ──────────────
 
-- (BOOL)runObjectnessSaliency:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runObjectnessSaliency:(NSString *)imagePath base:(NSString *)base artifactPaths:(NSMutableArray<NSDictionary *> *)artifactPaths error:(NSError **)error {
     CGImageRef cgImage = [self loadCGImage:imagePath error:error];
     if (!cgImage) return NO;
 
@@ -305,9 +278,9 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
     }
 
     CIImage *heatmap = [CIImage imageWithCVPixelBuffer:obs.pixelBuffer];
-    NSString *outPath = [self outputPathForBase:base suffix:@"objectness_saliency" outputDir:outputDir inputPath:imagePath];
+    NSString *outPath = [self outputPathForBase:base suffix:@"objectness_saliency" inputPath:imagePath];
     BOOL ok = [self saveCIImage:heatmap toPath:outPath error:error];
-    if (ok) printf("Saved: %s\n", outPath.UTF8String);
+    if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"objectness_saliency")];
     return ok;
 }
 
@@ -353,18 +326,12 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
     return [pngData writeToFile:path options:NSDataWritingAtomic error:error];
 }
 
-- (NSString *)outputPathForBase:(NSString *)base suffix:(NSString *)suffix outputDir:(nullable NSString *)outputDir inputPath:(NSString *)inputPath {
+- (NSString *)outputPathForBase:(NSString *)base suffix:(NSString *)suffix inputPath:(NSString *)inputPath {
     NSString *filename = [NSString stringWithFormat:@"%@_%@.png", base, suffix];
-    if (outputDir) {
-        return [outputDir stringByAppendingPathComponent:filename];
+    if (self.artifactsDir.length) {
+        return [self.artifactsDir stringByAppendingPathComponent:filename];
     }
-    // Same directory as input
     return [[inputPath stringByDeletingLastPathComponent] stringByAppendingPathComponent:filename];
-}
-
-- (BOOL)isImageFile:(NSString *)filePath {
-    NSArray<NSString *> *extensions = @[@"jpg", @"jpeg", @"png", @"webp"];
-    return [extensions containsObject:[filePath.pathExtension lowercaseString]];
 }
 
 @end

@@ -1,18 +1,34 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <AVFoundation/AVFoundation.h>
 #import <Speech/Speech.h>
 #import <SoundAnalysis/SoundAnalysis.h>
 #import <ShazamKit/ShazamKit.h>
 #import <Cocoa/Cocoa.h>
+#import <CoreMedia/CoreMedia.h>
 #include <math.h>
 
 static NSString *const AudioErrorDomain = @"AudioProcessorError";
+
+static NSArray<NSDictionary *> *MVAudioArtifactEntries(NSDictionary *result) {
+    NSMutableArray *a = [NSMutableArray array];
+    id res = result[@"results"];
+    if ([res isKindOfClass:[NSDictionary class]]) {
+        NSString *o = res[@"output"];
+        if ([o isKindOfClass:[NSString class]] && o.length)
+            [a addObject:MVArtifactEntry(o, @"isolated_audio")];
+    }
+    NSString *cat = result[@"catalog"];
+    if ([cat isKindOfClass:[NSString class]] && cat.length)
+        [a addObject:MVArtifactEntry(cat, @"shazam_catalog")];
+    return a;
+}
 
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
 static void APrintJSON(id obj) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:nil];
     if (data) {
         NSString *str = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -22,7 +38,7 @@ static void APrintJSON(id obj) {
 
 static BOOL AWriteJSON(id obj, NSURL *url, NSError **error) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:error];
     if (!data) return NO;
     [[NSFileManager defaultManager] createDirectoryAtURL:[url URLByDeletingLastPathComponent]
@@ -166,6 +182,9 @@ API_AVAILABLE(macos(12.0))
         _operation = @"classify";
         _lang      = @"en-US";
         _topk      = 3;
+        _classifyWindowDurationSet = NO;
+        _classifyOverlapFactorSet  = NO;
+        _pitchHopFrames            = 0;
     }
     return self;
 }
@@ -173,12 +192,12 @@ API_AVAILABLE(macos(12.0))
 // ── Public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    BOOL hasInput = self.audio || self.audioDir || self.mic;
+    BOOL hasInput = self.inputPath.length > 0 || self.mic;
     if (!hasInput) {
         if (error) {
             *error = [NSError errorWithDomain:AudioErrorDomain code:1
                                      userInfo:@{NSLocalizedDescriptionKey:
-                                                    @"Provide --audio, --audio-dir, or --mic"}];
+                                                    @"Provide --input <audio> (or directory for shazam-build), or --mic"}];
         }
         return NO;
     }
@@ -199,45 +218,13 @@ API_AVAILABLE(macos(12.0))
         return [self runStreamingWithError:error];
     }
 
-    NSArray<NSURL *> *files;
-    if (self.audioDir) {
-        files = [self listAudioFilesInDirectory:self.audioDir error:error];
-        if (!files) return NO;
-    } else if (self.audio) {
-        files = @[[NSURL fileURLWithPath:self.audio]];
-    } else {
-        files = @[];
-    }
+    NSURL *fileURL = [NSURL fileURLWithPath:self.inputPath];
+    NSDictionary *result = [self processFile:fileURL error:error];
+    if (!result) return NO;
 
-    if (self.debug) {
-        fprintf(stderr, "Processing %lu files\n", (unsigned long)files.count);
-    }
-
-    NSMutableArray *allResults = [NSMutableArray array];
-
-    for (NSURL *fileURL in files) {
-        NSDictionary *result = [self processFile:fileURL error:error];
-        if (!result) return NO;
-
-        if (self.outputDir) {
-            NSString *baseName = [[fileURL.lastPathComponent stringByDeletingPathExtension]
-                                  stringByAppendingPathExtension:@"json"];
-            NSURL *outURL = [[NSURL fileURLWithPath:self.outputDir] URLByAppendingPathComponent:baseName];
-            if (!AWriteJSON(result, outURL, error)) return NO;
-        } else if (files.count == 1 && self.output) {
-            if (!AWriteJSON(result, [NSURL fileURLWithPath:self.output], error)) return NO;
-        } else if (!self.outputDir && !self.output) {
-            APrintJSON(result);
-        }
-        [allResults addObject:result];
-    }
-
-    if (self.merge && self.output) {
-        NSDictionary *merged = @{@"operation": self.operation, @"files": allResults};
-        if (!AWriteJSON(merged, [NSURL fileURLWithPath:self.output], error)) return NO;
-    }
-
-    return YES;
+    result = MVResultByMergingArtifacts(result, MVAudioArtifactEntries(result));
+    NSDictionary *envelope = MVMakeEnvelope(@"audio", self.operation, self.inputPath, result);
+    return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
 // ── Per-file dispatcher ───────────────────────────────────────────────────────
@@ -290,7 +277,7 @@ API_AVAILABLE(macos(12.0))
     NSMutableDictionary *dict = [@{
         @"operation":  self.operation,
         @"file":       url.lastPathComponent,
-        @"path":       url.path,
+        @"path":       MVRelativePath(url.path),
         @"duration":   fi[@"duration"],
         @"sampleRate": fi[@"sampleRate"],
         @"channels":   fi[@"channels"],
@@ -393,6 +380,38 @@ API_AVAILABLE(macos(12.0))
     return segments;
 }
 
+// ── SNClassifySoundRequest optional window / overlap (macOS 12+) ───────────────
+
+- (BOOL)configureClassifySoundRequest:(SNClassifySoundRequest *)request error:(NSError **)error {
+    if (@available(macOS 12.0, *)) {
+        if (self.classifyOverlapFactorSet) {
+            double o = self.classifyOverlapFactor;
+            if (o < 0.0 || o >= 1.0) {
+                if (error) {
+                    *error = [NSError errorWithDomain:AudioErrorDomain code:24
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            @"--classify-overlap must be in [0.0, 1.0) (see SNClassifySoundRequest.overlapFactor)"}];
+                }
+                return NO;
+            }
+            request.overlapFactor = o;
+        }
+        if (self.classifyWindowDurationSet) {
+            double w = self.classifyWindowDuration;
+            if (w <= 0.0 || !isfinite(w)) {
+                if (error) {
+                    *error = [NSError errorWithDomain:AudioErrorDomain code:25
+                                             userInfo:@{NSLocalizedDescriptionKey:
+                                                            @"--classify-window must be a finite number of seconds > 0"}];
+                }
+                return NO;
+            }
+            request.windowDuration = CMTimeMakeWithSeconds(w, 1000000);
+        }
+    }
+    return YES;
+}
+
 // ── classify (SNClassifySoundRequest, macOS 12+) ──────────────────────────────
 
 - (nullable NSArray *)classifyURL:(NSURL *)url error:(NSError **)error {
@@ -401,6 +420,7 @@ API_AVAILABLE(macos(12.0))
             [[SNClassifySoundRequest alloc] initWithClassifierIdentifier:SNClassifierIdentifierVersion1
                                                                    error:error];
         if (!request) return nil;
+        if (![self configureClassifySoundRequest:request error:error]) return nil;
 
         SNAudioFileAnalyzer *analyzer = [[SNAudioFileAnalyzer alloc] initWithURL:url error:error];
         if (!analyzer) return nil;
@@ -450,6 +470,7 @@ API_AVAILABLE(macos(12.0))
             [[SNClassifySoundRequest alloc] initWithClassifierIdentifier:SNClassifierIdentifierVersion1
                                                                    error:error];
         if (!request) return nil;
+        if (![self configureClassifySoundRequest:request error:error]) return nil;
 
         SNAudioFileAnalyzer *analyzer = [[SNAudioFileAnalyzer alloc] initWithURL:url error:error];
         if (!analyzer) return nil;
@@ -541,7 +562,24 @@ API_AVAILABLE(macos(12.0))
 
     float *data  = ch[0];
     float sr     = (float)format.sampleRate;
-    NSInteger win = 2048, hop = 512;
+    NSInteger win = 2048;
+    NSInteger hop = self.pitchHopFrames > 0 ? self.pitchHopFrames : 512;
+    if (hop < 32) {
+        if (error) {
+            *error = [NSError errorWithDomain:AudioErrorDomain code:26
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                    @"--pitch-hop must be at least 32 audio frames"}];
+        }
+        return nil;
+    }
+    if (hop > 1048576) {
+        if (error) {
+            *error = [NSError errorWithDomain:AudioErrorDomain code:26
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                    @"--pitch-hop is unreasonably large"}];
+        }
+        return nil;
+    }
     NSMutableArray *pitches = [NSMutableArray array];
 
     for (NSInteger s = 0; s + win < (NSInteger)buf.frameLength; s += hop) {
@@ -582,10 +620,8 @@ API_AVAILABLE(macos(12.0))
     NSString *name = [NSString stringWithFormat:@"isolated_%@.m4a",
                       url.lastPathComponent.stringByDeletingPathExtension];
     NSURL *outDirURL;
-    if (self.outputDir) {
-        outDirURL = [NSURL fileURLWithPath:self.outputDir];
-    } else if (self.output) {
-        outDirURL = [[NSURL fileURLWithPath:self.output] URLByDeletingLastPathComponent];
+    if (self.artifactsDir.length) {
+        outDirURL = [NSURL fileURLWithPath:self.artifactsDir];
     } else {
         outDirURL = [NSURL fileURLWithPath:NSTemporaryDirectory()];
     }
@@ -637,8 +673,8 @@ API_AVAILABLE(macos(12.0))
     [engine stop];
 
     return @{
-        @"input":  url.path,
-        @"output": outURL.path,
+        @"input":  MVRelativePath(url.path),
+        @"output": MVRelativePath(outURL.path),
         @"method": @"high-pass filter (150Hz)",
         @"note":   @"macOS 15+ voiceProcessing API available for better isolation"
     };
@@ -671,7 +707,7 @@ API_AVAILABLE(macos(12.0))
 
         NSMutableDictionary *result = [delegate.result mutableCopy];
         if (self.catalog) {
-            result[@"catalog"] = self.catalog;
+            result[@"catalog"] = MVRelativePath(self.catalog);
         } else {
             result[@"note"] = @"No --catalog provided; matched against default Shazam catalog";
         }
@@ -693,7 +729,7 @@ API_AVAILABLE(macos(12.0))
         if (error) {
             *error = [NSError errorWithDomain:AudioErrorDomain code:50
                                      userInfo:@{NSLocalizedDescriptionKey:
-                                                    @"shazam-build requires a directory path (pass via --audio)"}];
+                                                    @"shazam-build requires a directory path (--input)"}];
         }
         return nil;
     }
@@ -733,15 +769,10 @@ API_AVAILABLE(macos(12.0))
             }
         }
 
-        // Derive .shazamcatalog path from --output, --output-dir, or fall back to input dir
         NSURL *catalogURL;
-        if (self.output) {
-            NSString *base = [[self.output stringByDeletingPathExtension]
-                              stringByAppendingPathExtension:@"shazamcatalog"];
-            catalogURL = [NSURL fileURLWithPath:base];
-        } else if (self.outputDir) {
+        if (self.artifactsDir.length) {
             NSString *name = [url.lastPathComponent stringByAppendingPathExtension:@"shazamcatalog"];
-            catalogURL = [[NSURL fileURLWithPath:self.outputDir] URLByAppendingPathComponent:name];
+            catalogURL = [[NSURL fileURLWithPath:self.artifactsDir] URLByAppendingPathComponent:name];
         } else {
             NSString *name = [url.lastPathComponent stringByAppendingPathExtension:@"shazamcatalog"];
             catalogURL = [[url URLByDeletingLastPathComponent] URLByAppendingPathComponent:name];
@@ -753,7 +784,7 @@ API_AVAILABLE(macos(12.0))
         if (![catalog writeToURL:catalogURL error:error]) return nil;
 
         NSMutableDictionary *result = [@{
-            @"catalog": catalogURL.path,
+            @"catalog": MVRelativePath(catalogURL.path),
             @"indexed": @(indexed.count),
             @"tracks":  indexed,
         } mutableCopy];
@@ -796,6 +827,7 @@ API_AVAILABLE(macos(12.0))
                 [[SNClassifySoundRequest alloc] initWithClassifierIdentifier:SNClassifierIdentifierVersion1
                                                                        error:error];
             if (!req) return NO;
+            if (![self configureClassifySoundRequest:req error:error]) return NO;
             AudioClassificationObserver *obs = [[AudioClassificationObserver alloc] initWithTopK:self.topk];
             if (![sa addRequest:req withObserver:obs error:error]) return NO;
 
@@ -806,7 +838,9 @@ API_AVAILABLE(macos(12.0))
             if (![engine startAndReturnError:error]) return NO;
             char lb[256]; fgets(lb, sizeof(lb), stdin);
             [engine stop];
-            APrintJSON(@{@"operation": @"classify", @"source": @"mic", @"results": obs.results});
+            NSDictionary *inner = @{@"operation": @"classify", @"source": @"mic", @"results": obs.results};
+            NSDictionary *env = MVMakeEnvelope(@"audio", @"classify", @"mic", inner);
+            if (!MVEmitEnvelope(env, self.jsonOutput, error)) return NO;
         } else {
             if (error) {
                 *error = [NSError errorWithDomain:AudioErrorDomain code:22
@@ -840,7 +874,11 @@ API_AVAILABLE(macos(12.0))
         [engine stop];
         [req endAudio];
         [task cancel];
-        APrintJSON(@{@"operation": @"transcribe", @"source": @"mic", @"text": finalText});
+        {
+            NSDictionary *inner = @{@"operation": @"transcribe", @"source": @"mic", @"text": finalText};
+            NSDictionary *env = MVMakeEnvelope(@"audio", @"transcribe", @"mic", inner);
+            if (!MVEmitEnvelope(env, self.jsonOutput, error)) return NO;
+        }
     }
     return YES;
 }

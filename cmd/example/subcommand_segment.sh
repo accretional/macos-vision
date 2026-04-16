@@ -2,11 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="$ROOT/.build/debug/macos-vision"
-IMG="$ROOT/sample_data/input/images"
-OUTPUT="$ROOT/sample_data/output/segment"
 
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"; export ROOT
+eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'export {k}="{root}/{v}"') for k,v in json.load(open(f)).items()]" "$ROOT" "$SCRIPT_DIR/data_files.json")"
+
+OUTPUT="$ROOT/sample_data/output/segment"
 mkdir -p "$OUTPUT"
 
 run() {
@@ -20,31 +20,31 @@ run() {
 }
 
 # ── foreground-mask ───────────────────────────────────────────────────────────
-run "foreground-mask" "$IMG/sad_pablo.png" \
-    "$BINARY" segment --img "$IMG/sad_pablo.png" \
+run "foreground-mask" "$EXAMPLE_IMG_SAD_PABLO" \
+    "$BINARY" segment --input "$EXAMPLE_IMG_SAD_PABLO" \
                       --operation foreground-mask \
                       --output "$OUTPUT"
 
 # ── person-segment ────────────────────────────────────────────────────────────
-run "person-segment" "$IMG/gorilla.jpg" \
-    "$BINARY" segment --img "$IMG/gorilla.jpg" \
+run "person-segment" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
                       --operation person-segment \
                       --output "$OUTPUT"
 
 # ── person-mask ───────────────────────────────────────────────────────────────
-run "person-mask" "$IMG/gorilla.jpg" \
-    "$BINARY" segment --img "$IMG/gorilla.jpg" \
+run "person-mask" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
                       --operation person-mask \
                       --output "$OUTPUT"
 
 # ── attention-saliency ────────────────────────────────────────────────────────
-run "attention-saliency" "$IMG/gorilla.jpg" \
-    "$BINARY" segment --img "$IMG/gorilla.jpg" \
+run "attention-saliency" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
                       --operation attention-saliency \
                       --output "$OUTPUT"
 
 # ── objectness-saliency ───────────────────────────────────────────────────────
-run "objectness-saliency" "$IMG/gorilla.jpg" \
-    "$BINARY" segment --img "$IMG/gorilla.jpg" \
+run "objectness-saliency" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
                       --operation objectness-saliency \
                       --output "$OUTPUT"

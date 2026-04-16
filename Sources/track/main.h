@@ -4,10 +4,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface TrackProcessor : NSObject
 
-@property (nonatomic, copy, nullable) NSString *video;    // path to a video file
-@property (nonatomic, copy, nullable) NSString *imgDir;   // directory of image frames (sorted)
-@property (nonatomic, copy, nullable) NSString *output;   // output directory
-@property (nonatomic, copy, nullable) NSString *outputDir;
+/// Video file path, or a directory of ordered image frames (for sequence mode).
+@property (nonatomic, copy, nullable) NSString *inputPath;
+@property (nonatomic, copy, nullable) NSString *jsonOutput;
+/// Required for optical-flow when saving flow PNG frames; otherwise ignored.
+@property (nonatomic, copy, nullable) NSString *artifactsDir;
 // homographic (default) | translational | optical-flow | trajectories
 @property (nonatomic, copy) NSString *operation;
 

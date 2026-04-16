@@ -1,4 +1,5 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <NaturalLanguage/NaturalLanguage.h>
 
 static NSString * const NLProcErrorDomain = @"NLProcError";
@@ -21,14 +22,14 @@ typedef NS_ENUM(NSInteger, NLProcessorErrorCode) {
 
 static void NLPrintJSON(id obj) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:nil];
     if (data) printf("%s\n", [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String);
 }
 
 static BOOL NLWriteJSON(id obj, NSURL *url, NSError **error) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:error];
     if (!data) return NO;
     [[NSFileManager defaultManager] createDirectoryAtURL:url.URLByDeletingLastPathComponent
@@ -111,32 +112,21 @@ static NLTokenUnit NLUnitFromName(NSString *name) {
     return out;
 }
 
-- (BOOL)resolveTextForBatch:(NSError **)error intoString:(NSString **)outStr files:(NSArray<NSURL *> **)outFiles {
+/// Sets `outStr` from --text or --input file. Returns NO if neither provided.
+- (BOOL)resolvePrimaryText:(NSError **)error intoString:(NSString **)outStr {
     if (self.text.length) {
         *outStr = self.text;
-        *outFiles = nil;
         return YES;
     }
-    if (self.input) {
+    if (self.input.length) {
         NSURL *u = [NSURL fileURLWithPath:self.input];
         *outStr = [self loadTextFromURL:u error:error];
-        *outFiles = nil;
         return *outStr != nil;
     }
-    if (self.inputDir) {
-        NSArray *files = [self listTextFiles:self.inputDir error:error];
-        if (!files) return NO;
-        if (files.count == 0) {
-            if (error) *error = [NSError errorWithDomain:NLProcErrorDomain code:1
-                                userInfo:@{NSLocalizedDescriptionKey: @"No .txt/.md files in --input-dir"}];
-            return NO;
-        }
-        *outFiles = files;
-        *outStr = nil;
-        return YES;
+    if (error) {
+        *error = [NSError errorWithDomain:NLProcErrorDomain code:2
+                     userInfo:@{NSLocalizedDescriptionKey: @"Provide --text or --input <file>"}];
     }
-    if (error) *error = [NSError errorWithDomain:NLProcErrorDomain code:2
-                         userInfo:@{NSLocalizedDescriptionKey: @"Provide --text, --input, or --input-dir"}];
     return NO;
 }
 
@@ -427,7 +417,7 @@ static NLTokenUnit NLUnitFromName(NSString *name) {
 
     NSMutableDictionary *base = [NSMutableDictionary dictionary];
     base[@"operation"] = self.operation;
-    if (sourcePath) base[@"path"] = sourcePath;
+    if (sourcePath) base[@"path"] = MVRelativePath(sourcePath);
 
     NSDictionary *payload = nil;
     if ([self.operation isEqualToString:@"detect-language"]) {
@@ -454,62 +444,28 @@ static NLTokenUnit NLUnitFromName(NSString *name) {
 }
 
 - (BOOL)runWithError:(NSError **)error {
-    // embed (--word / --similar) and distance (--word-a / --word-b) don't need
-    // text input — dispatch directly so we don't require --text / --input.
+    NSString *inputLabel = self.input ?: self.text ?: @"";
+
     if ([self.operation isEqualToString:@"distance"]) {
         NSDictionary *r = [self runDistanceWithError:error];
         if (!r) return NO;
-        if (self.output) return NLWriteJSON(r, [NSURL fileURLWithPath:self.output], error);
-        NLPrintJSON(r);
-        return YES;
+        NSDictionary *env = MVMakeEnvelope(@"nl", self.operation, inputLabel, r);
+        return MVEmitEnvelope(env, self.jsonOutput, error);
     }
     if ([self.operation isEqualToString:@"embed"] && (self.word.length || self.similar.length)) {
         NSDictionary *r = [self runEmbedOnText:@"" error:error];
         if (!r) return NO;
-        if (self.output) return NLWriteJSON(r, [NSURL fileURLWithPath:self.output], error);
-        NLPrintJSON(r);
-        return YES;
+        NSDictionary *env = MVMakeEnvelope(@"nl", self.operation, inputLabel, r);
+        return MVEmitEnvelope(env, self.jsonOutput, error);
     }
 
     NSString *singleText = nil;
-    NSArray<NSURL *> *files = nil;
-    if (![self resolveTextForBatch:error intoString:&singleText files:&files]) return NO;
+    if (![self resolvePrimaryText:error intoString:&singleText]) return NO;
 
-    if (singleText) {
-        NSDictionary *r = [self runOperationOnText:singleText source:self.input error:error];
-        if (!r) return NO;
-        if (self.output) {
-            if (!NLWriteJSON(r, [NSURL fileURLWithPath:self.output], error)) return NO;
-        } else {
-            NLPrintJSON(r);
-        }
-        return YES;
-    }
-
-    NSMutableArray *all = [NSMutableArray array];
-    for (NSURL *u in files) {
-        NSString *txt = [self loadTextFromURL:u error:error];
-        if (!txt) return NO;
-        NSDictionary *r = [self runOperationOnText:txt source:u.path error:error];
-        if (!r) return NO;
-        if (self.outputDir) {
-            NSString *name = [[u.lastPathComponent stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
-            NSURL *out = [[NSURL fileURLWithPath:self.outputDir] URLByAppendingPathComponent:name];
-            if (!NLWriteJSON(r, out, error)) return NO;
-        } else if (files.count == 1 && self.output) {
-            if (!NLWriteJSON(r, [NSURL fileURLWithPath:self.output], error)) return NO;
-        } else {
-            NLPrintJSON(r);
-        }
-        [all addObject:r];
-    }
-
-    if (self.merge && self.output) {
-        NSDictionary *merged = @{ @"operation": self.operation, @"files": all };
-        if (!NLWriteJSON(merged, [NSURL fileURLWithPath:self.output], error)) return NO;
-    }
-
-    return YES;
+    NSDictionary *r = [self runOperationOnText:singleText source:self.input error:error];
+    if (!r) return NO;
+    NSDictionary *env = MVMakeEnvelope(@"nl", self.operation, inputLabel.length ? inputLabel : @"<inline>", r);
+    return MVEmitEnvelope(env, self.jsonOutput, error);
 }
 
 @end

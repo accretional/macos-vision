@@ -2,11 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="$ROOT/.build/debug/macos-vision"
-INPUT_DIR="$ROOT/sample_data/input/text"
-OUTPUT="$ROOT/sample_data/output/nl"
 
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"; export ROOT
+eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'export {k}="{root}/{v}"') for k,v in json.load(open(f)).items()]" "$ROOT" "$SCRIPT_DIR/data_files.json")"
+
+OUTPUT="$ROOT/sample_data/output/nl"
 mkdir -p "$OUTPUT"
 
 run_file() {
@@ -19,52 +19,47 @@ run_file() {
     "$@"
 }
 
-run() {                                                                                                                                                                                           
+run() {
     local label="$1"; shift
     echo "  RUN   $label"
     "$@"
-} 
-
-filename_base() {
-    local file="$1"
-    basename "$file" | sed 's/\.[^.]*$//'
 }
 
 # ── detect-language ───────────────────────────────────────────────────────────
-run_file "detect-language (file)" "$INPUT_DIR/cestlavie.txt" \
-    "$BINARY" nl --input "$INPUT_DIR/cestlavie.txt" \
+run_file "detect-language (file)" "$EXAMPLE_TEXT_CESTLAVIE" \
+    "$BINARY" nl --input "$EXAMPLE_TEXT_CESTLAVIE" \
                  --operation detect-language \
                  --topk 5 \
                  --output "$OUTPUT/cestlavie_detect_language.json"
 
 # ── tokenize ──────────────────────────────────────────────────────────────────
-run_file "tokenize (word)" "$INPUT_DIR/joker.txt" \
-    "$BINARY" nl --input "$INPUT_DIR/joker.txt" \
+run_file "tokenize (word)" "$EXAMPLE_TEXT_JOKER" \
+    "$BINARY" nl --input "$EXAMPLE_TEXT_JOKER" \
                  --operation tokenize \
                  --unit word \
                  --output "$OUTPUT/joker_tokenize_word.json"
 
-run_file "tokenize (sentence)" "$INPUT_DIR/mordor.txt" \
-    "$BINARY" nl --input "$INPUT_DIR/mordor.txt" \
+run_file "tokenize (sentence)" "$EXAMPLE_TEXT_MORDOR" \
+    "$BINARY" nl --input "$EXAMPLE_TEXT_MORDOR" \
                  --operation tokenize \
                  --unit sentence \
                  --output "$OUTPUT/mordor_tokenize_sentence.json"
 
 # ── tag ───────────────────────────────────────────────────────────────────────
-run_file "tag (pos)" "$INPUT_DIR/seashells.txt" \
-    "$BINARY" nl --input "$INPUT_DIR/seashells.txt" \
+run_file "tag (pos)" "$EXAMPLE_TEXT_SEASHELLS" \
+    "$BINARY" nl --input "$EXAMPLE_TEXT_SEASHELLS" \
                  --operation tag \
                  --scheme pos \
                  --output "$OUTPUT/seashells_tag_pos.json"
 
-run_file "tag (ner)" "$INPUT_DIR/seashells.txt" \
-    "$BINARY" nl --input "$INPUT_DIR/seashells.txt" \
+run_file "tag (ner)" "$EXAMPLE_TEXT_SEASHELLS" \
+    "$BINARY" nl --input "$EXAMPLE_TEXT_SEASHELLS" \
                  --operation tag \
                  --scheme ner \
                  --output "$OUTPUT/seashells_tag_ner.json"
 
-run_file "tag (lemma)" "$INPUT_DIR/indecisive.txt" \
-    "$BINARY" nl --input "$INPUT_DIR/indecisive.txt" \
+run_file "tag (lemma)" "$EXAMPLE_TEXT_INDECISIVE" \
+    "$BINARY" nl --input "$EXAMPLE_TEXT_INDECISIVE" \
                  --operation tag \
                  --scheme lemma \
                  --output "$OUTPUT/indecisive_tag_lemma.json"
@@ -94,22 +89,8 @@ run "distance" \
                  --output "$OUTPUT/cat_dog_distance.json"
 
 # ── embed (from file) ─────────────────────────────────────────────────────────
-run_file "embed (file)" "$INPUT_DIR/indecisive.txt" \
-    "$BINARY" nl --input "$INPUT_DIR/indecisive.txt" \
+run_file "embed (file)" "$EXAMPLE_TEXT_INDECISIVE" \
+    "$BINARY" nl --input "$EXAMPLE_TEXT_INDECISIVE" \
                  --operation embed \
                  --output "$OUTPUT/indecisive_embed.json"
 
-# ── batch (input-dir) ─────────────────────────────────────────────────────────
-run_file "batch tokenize" "$INPUT_DIR/joker.txt" \
-    "$BINARY" nl --input-dir "$INPUT_DIR" \
-                 --operation tokenize \
-                 --unit word \
-                 --output-dir "$OUTPUT/batch_tokenize_word"
-
-run_file "batch tag (pos) --merge" "$INPUT_DIR/joker.txt" \
-    "$BINARY" nl --input-dir "$INPUT_DIR" \
-                 --operation tag \
-                 --scheme pos \
-                 --merge \
-                 --output-dir "$OUTPUT/batch_tag_pos" \
-                 --output "$OUTPUT/batch_tag_pos_merged.json"

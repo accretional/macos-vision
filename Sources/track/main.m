@@ -1,4 +1,5 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 #import <AVFoundation/AVFoundation.h>
@@ -21,27 +22,35 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 - (BOOL)runWithError:(NSError **)error {
     NSString *op = self.operation.length ? self.operation : @"homographic";
-    NSString *outDir = self.output ?: self.outputDir;
-
-    if (self.video) {
-        return [self processVideo:self.video outputDir:outDir operation:op error:error];
-    } else if (self.imgDir) {
-        return [self processImageSequence:self.imgDir outputDir:outDir operation:op error:error];
+    if (!self.inputPath.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorMissingInput
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <video.mp4> or --input <frames-dir>"}];
+        }
+        return NO;
     }
-    if (error) {
-        *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorMissingInput
-                                userInfo:@{NSLocalizedDescriptionKey: @"Either --video or --img-dir must be provided"}];
+    BOOL isDir = NO;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:self.inputPath isDirectory:&isDir]) {
+        if (error) {
+            *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorVideoLoadFailed
+                                    userInfo:@{NSLocalizedDescriptionKey:
+                                                   [NSString stringWithFormat:@"Path not found: %@", self.inputPath]}];
+        }
+        return NO;
     }
-    return NO;
+    if (isDir) {
+        return [self processImageSequence:self.inputPath operation:op error:error];
+    }
+    return [self processVideo:self.inputPath operation:op error:error];
 }
 
 // ── image-sequence mode (VNSequenceRequestHandler) ────────────────────────────
 
-- (BOOL)processImageSequence:(NSString *)imgDir outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
+- (BOOL)processImageSequence:(NSString *)imgDir operation:(NSString *)op error:(NSError **)error {
     if (@available(macOS 11.0, *)) {
         NSFileManager *fm = [NSFileManager defaultManager];
-        if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-            if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+        if (self.artifactsDir.length && ![fm fileExistsAtPath:self.artifactsDir]) {
+            if (![fm createDirectoryAtPath:self.artifactsDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
         }
 
         // Collect sorted image files
@@ -60,13 +69,13 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
         }
 
         if ([op isEqualToString:@"homographic"])
-            return [self runHomographicSequence:imageFiles imgDir:imgDir outputDir:outputDir error:error];
+            return [self runHomographicSequence:imageFiles imgDir:imgDir error:error];
         if ([op isEqualToString:@"translational"])
-            return [self runTranslationalSequence:imageFiles imgDir:imgDir outputDir:outputDir error:error];
+            return [self runTranslationalSequence:imageFiles imgDir:imgDir error:error];
         if ([op isEqualToString:@"optical-flow"])
-            return [self runOpticalFlowSequence:imageFiles imgDir:imgDir outputDir:outputDir error:error];
+            return [self runOpticalFlowSequence:imageFiles imgDir:imgDir error:error];
         if ([op isEqualToString:@"trajectories"])
-            return [self runTrajectoriesSequence:imageFiles imgDir:imgDir outputDir:outputDir error:error];
+            return [self runTrajectoriesSequence:imageFiles imgDir:imgDir error:error];
 
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorMissingInput
                                             userInfo:@{NSLocalizedDescriptionKey:
@@ -81,11 +90,11 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 // ── video mode (VNVideoProcessor) ─────────────────────────────────────────────
 
-- (BOOL)processVideo:(NSString *)videoPath outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
+- (BOOL)processVideo:(NSString *)videoPath operation:(NSString *)op error:(NSError **)error {
     if (@available(macOS 11.0, *)) {
         NSFileManager *fm = [NSFileManager defaultManager];
-        if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-            if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+        if (self.artifactsDir.length && ![fm fileExistsAtPath:self.artifactsDir]) {
+            if (![fm createDirectoryAtPath:self.artifactsDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
         }
 
         NSURL *videoURL = [NSURL fileURLWithPath:videoPath];
@@ -100,14 +109,14 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
         NSString *videoName = [[videoPath lastPathComponent] stringByDeletingPathExtension];
 
         if ([op isEqualToString:@"trajectories"])
-            return [self runTrajectoriesVideo:processor videoName:videoName outputDir:outputDir error:error];
+            return [self runTrajectoriesVideo:processor videoName:videoName error:error];
         if (@available(macOS 14.0, *)) {
             if ([op isEqualToString:@"homographic"])
-                return [self runHomographicVideo:processor videoName:videoName outputDir:outputDir error:error];
+                return [self runHomographicVideo:processor videoName:videoName error:error];
             if ([op isEqualToString:@"translational"])
-                return [self runTranslationalVideo:processor videoName:videoName outputDir:outputDir error:error];
+                return [self runTranslationalVideo:processor videoName:videoName error:error];
             if ([op isEqualToString:@"optical-flow"])
-                return [self runOpticalFlowVideo:processor videoName:videoName outputDir:outputDir error:error];
+                return [self runOpticalFlowVideo:processor videoName:videoName error:error];
         } else {
             if ([op isEqualToString:@"homographic"] || [op isEqualToString:@"translational"] || [op isEqualToString:@"optical-flow"]) {
                 if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
@@ -129,7 +138,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 // ── homographic image sequence ────────────────────────────────────────────────
 
-- (BOOL)runHomographicSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runHomographicSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir error:(NSError **)error {
     if (@available(macOS 14.0, *)) {
         VNSequenceRequestHandler *seqHandler = [[VNSequenceRequestHandler alloc] init];
         NSMutableArray *frames = [NSMutableArray array];
@@ -167,7 +176,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
             @"frameCount": @(imageFiles.count),
             @"frames":     frames,
         };
-        return [self saveJSON:json suffix:@"homographic" outputDir:outputDir error:error];
+        return [self saveJSON:json error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"homographic requires macOS 14.0+"}];
@@ -177,7 +186,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 // ── translational image sequence ──────────────────────────────────────────────
 
-- (BOOL)runTranslationalSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runTranslationalSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir error:(NSError **)error {
     if (@available(macOS 14.0, *)) {
         VNSequenceRequestHandler *seqHandler = [[VNSequenceRequestHandler alloc] init];
         NSMutableArray *frames = [NSMutableArray array];
@@ -216,7 +225,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
             @"frameCount": @(imageFiles.count),
             @"frames":     frames,
         };
-        return [self saveJSON:json suffix:@"translational" outputDir:outputDir error:error];
+        return [self saveJSON:json error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"translational requires macOS 14.0+"}];
@@ -226,13 +235,21 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 // ── optical-flow image sequence (macOS 14+) ───────────────────────────────────
 
-- (BOOL)runOpticalFlowSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runOpticalFlowSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir error:(NSError **)error {
     if (@available(macOS 14.0, *)) {
+        if (!self.artifactsDir.length) {
+            if (error) {
+                *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorMissingInput
+                                        userInfo:@{NSLocalizedDescriptionKey:
+                                                       @"optical-flow requires --artifacts-dir (directory for flow PNG frames)"}];
+            }
+            return NO;
+        }
         VNSequenceRequestHandler *seqHandler = [[VNSequenceRequestHandler alloc] init];
         NSMutableArray *frames = [NSMutableArray array];
         __block NSUInteger frameIndex = 0;
         __block NSUInteger flowFramesSaved = 0;
-        NSString *outDir = outputDir;
+        NSString *outDir = self.artifactsDir;
 
         VNTrackOpticalFlowRequest *req = [[VNTrackOpticalFlowRequest alloc]
             initWithFrameAnalysisSpacing:CMTimeMake(1, 30)
@@ -248,7 +265,6 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
                     [ctx writePNGRepresentationOfImage:flowImage toURL:[NSURL fileURLWithPath:path]
                                                format:kCIFormatRGBA8 colorSpace:cs options:@{} error:nil];
                     CGColorSpaceRelease(cs);
-                    printf("Saved: %s\n", path.UTF8String);
                     flowFramesSaved++;
                 }
                 [frames addObject:@{@"frameIndex": @(frameIndex), @"hasFlow": @(obs != nil)}];
@@ -270,7 +286,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
             @"flowsSaved":  @(flowFramesSaved),
             @"frames":      frames,
         };
-        return [self saveJSON:json suffix:@"optical_flow" outputDir:outputDir error:error];
+        return [self saveJSON:json error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"optical-flow requires macOS 14.0+"}];
@@ -280,7 +296,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 // ── trajectories image sequence (macOS 11+) ───────────────────────────────────
 
-- (BOOL)runTrajectoriesSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runTrajectoriesSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir error:(NSError **)error {
     if (@available(macOS 11.0, *)) {
         VNSequenceRequestHandler *seqHandler = [[VNSequenceRequestHandler alloc] init];
         NSMutableArray *allTrajectories = [NSMutableArray array];
@@ -322,7 +338,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
             @"frameCount":   @(imageFiles.count),
             @"trajectories": allTrajectories,
         };
-        return [self saveJSON:json suffix:@"trajectories" outputDir:outputDir error:error];
+        return [self saveJSON:json error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"trajectories requires macOS 11.0+"}];
@@ -332,7 +348,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 // ── video: trajectories ───────────────────────────────────────────────────────
 
-- (BOOL)runTrajectoriesVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName outputDir:(nullable NSString *)outputDir error:(NSError **)error API_AVAILABLE(macos(11.0)) {
+- (BOOL)runTrajectoriesVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName error:(NSError **)error API_AVAILABLE(macos(11.0)) {
     NSMutableArray *allTrajectories = [NSMutableArray array];
 
     VNDetectTrajectoriesRequest *req = [[VNDetectTrajectoriesRequest alloc]
@@ -361,12 +377,12 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
     if (![processor analyzeTimeRange:CMTimeRangeMake(kCMTimeZero, kCMTimePositiveInfinity) error:error]) return NO;
 
     NSDictionary *json = @{@"operation": @"trajectories", @"video": videoName, @"trajectories": allTrajectories};
-    return [self saveJSON:json suffix:@"trajectories" outputDir:outputDir error:error];
+    return [self saveJSON:json error:error];
 }
 
 // ── video: homographic ────────────────────────────────────────────────────────
 
-- (BOOL)runHomographicVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName outputDir:(nullable NSString *)outputDir error:(NSError **)error API_AVAILABLE(macos(14.0)) {
+- (BOOL)runHomographicVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName error:(NSError **)error API_AVAILABLE(macos(14.0)) {
     NSMutableArray *frames = [NSMutableArray array];
     __block NSUInteger frameIndex = 0;
 
@@ -396,12 +412,12 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
     if (![processor analyzeTimeRange:CMTimeRangeMake(kCMTimeZero, kCMTimePositiveInfinity) error:error]) return NO;
 
     NSDictionary *json = @{@"operation": @"homographic", @"video": videoName, @"frameCount": @(frameIndex), @"frames": frames};
-    return [self saveJSON:json suffix:@"homographic" outputDir:outputDir error:error];
+    return [self saveJSON:json error:error];
 }
 
 // ── video: translational ──────────────────────────────────────────────────────
 
-- (BOOL)runTranslationalVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName outputDir:(nullable NSString *)outputDir error:(NSError **)error API_AVAILABLE(macos(14.0)) {
+- (BOOL)runTranslationalVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName error:(NSError **)error API_AVAILABLE(macos(14.0)) {
     NSMutableArray *frames = [NSMutableArray array];
     __block NSUInteger frameIndex = 0;
 
@@ -431,16 +447,24 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
     if (![processor analyzeTimeRange:CMTimeRangeMake(kCMTimeZero, kCMTimePositiveInfinity) error:error]) return NO;
 
     NSDictionary *json = @{@"operation": @"translational", @"video": videoName, @"frameCount": @(frameIndex), @"frames": frames};
-    return [self saveJSON:json suffix:@"translational" outputDir:outputDir error:error];
+    return [self saveJSON:json error:error];
 }
 
 // ── video: optical-flow (macOS 14+) ───────────────────────────────────────────
 
-- (BOOL)runOpticalFlowVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName outputDir:(nullable NSString *)outputDir error:(NSError **)error API_AVAILABLE(macos(14.0)) {
+- (BOOL)runOpticalFlowVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName error:(NSError **)error API_AVAILABLE(macos(14.0)) {
     if (@available(macOS 14.0, *)) {
+        if (!self.artifactsDir.length) {
+            if (error) {
+                *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorMissingInput
+                                        userInfo:@{NSLocalizedDescriptionKey:
+                                                       @"optical-flow requires --artifacts-dir (directory for flow PNG frames)"}];
+            }
+            return NO;
+        }
         __block NSUInteger frameIndex = 0;
         __block NSUInteger flowsSaved = 0;
-        NSString *outDir = outputDir;
+        NSString *outDir = self.artifactsDir;
 
         VNTrackOpticalFlowRequest *req = [[VNTrackOpticalFlowRequest alloc]
             initWithFrameAnalysisSpacing:CMTimeMake(1, 30)
@@ -455,7 +479,6 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
                     [ctx writePNGRepresentationOfImage:flowImage toURL:[NSURL fileURLWithPath:path]
                                                format:kCIFormatRGBA8 colorSpace:cs options:@{} error:nil];
                     CGColorSpaceRelease(cs);
-                    printf("Saved: %s\n", path.UTF8String);
                     flowsSaved++;
                 }
                 frameIndex++;
@@ -474,7 +497,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
             @"frameCount": @(frameIndex),
             @"flowsSaved": @(flowsSaved),
         };
-        return [self saveJSON:json suffix:@"optical_flow" outputDir:outputDir error:error];
+        return [self saveJSON:json error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"optical-flow requires macOS 14.0+"}];
@@ -503,23 +526,15 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
     return cg;
 }
 
-- (BOOL)saveJSON:(NSDictionary *)json
-          suffix:(NSString *)suffix
-       outputDir:(nullable NSString *)outputDir
-           error:(NSError **)error {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:json options:NSJSONWritingPrettyPrinted error:error];
-    if (!data) return NO;
-    NSString *str = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-
-    if (outputDir) {
-        NSString *filename = [NSString stringWithFormat:@"track_%@.json", suffix];
-        NSString *path = [outputDir stringByAppendingPathComponent:filename];
-        if (![str writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:error]) return NO;
-        printf("Saved: %s\n", path.UTF8String);
-    } else {
-        printf("%s\n", str.UTF8String);
+- (BOOL)saveJSON:(NSDictionary *)json error:(NSError **)error {
+    NSString *op = json[@"operation"] ?: @"track";
+    NSMutableArray *extra = [NSMutableArray array];
+    if ([op isEqualToString:@"optical-flow"] && self.artifactsDir.length) {
+        [extra addObject:MVArtifactEntry(self.artifactsDir, @"optical_flow_frames")];
     }
-    return YES;
+    NSDictionary *merged = MVResultByMergingArtifacts(json, extra);
+    NSDictionary *envelope = MVMakeEnvelope(@"track", op, self.inputPath, merged);
+    return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
 - (BOOL)isImageFile:(NSString *)filePath {

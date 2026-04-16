@@ -1,4 +1,5 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <AVFoundation/AVFoundation.h>
 #import <Cocoa/Cocoa.h>
 #include <math.h>
@@ -9,7 +10,7 @@ static NSString *const CaptureErrorDomain = @"CaptureError";
 
 static void CPrintJSON(id obj) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:nil];
     if (data) {
         NSString *str = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -19,7 +20,7 @@ static void CPrintJSON(id obj) {
 
 static BOOL CWriteJSON(id obj, NSURL *url, NSError **error) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:error];
     if (!data) return NO;
     [[NSFileManager defaultManager] createDirectoryAtURL:[url URLByDeletingLastPathComponent]
@@ -151,46 +152,29 @@ static BOOL CWriteJSON(id obj, NSURL *url, NSError **error) {
     NSMutableDictionary *root = [@{ @"operation": @"list-devices", @"cameras": cameras, @"microphones": mics } mutableCopy];
     if (self.debug) root[@"processing_ms"] = @((NSInteger)(-[start timeIntervalSinceNow] * 1000.0));
 
-    NSData *data = [NSJSONSerialization dataWithJSONObject:root
-                                                      options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
-                                                        error:error];
-    if (!data) return NO;
-    NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (self.output.length) {
-        NSURL *url = [NSURL fileURLWithPath:self.output];
-        [[NSFileManager defaultManager] createDirectoryAtURL:url.URLByDeletingLastPathComponent
-                                 withIntermediateDirectories:YES attributes:nil error:nil];
-        if (![data writeToURL:url options:NSDataWritingAtomic error:error]) return NO;
-        fprintf(stderr, "Wrote %s\n", self.output.UTF8String);
-    } else {
-        printf("%s\n", json.UTF8String);
-    }
-    return YES;
+    NSMutableDictionary *inner = [root mutableCopy];
+    NSDictionary *env = MVMakeEnvelope(@"capture", @"list-devices", nil, inner);
+    return MVEmitEnvelope(env, self.jsonOutput, error);
 }
 
 // ── output dir helper ─────────────────────────────────────────────────────────
 
-/// Returns the directory where both the media file and JSON will be written.
-/// Priority: --output-dir > dir of --output > current working directory.
 - (NSURL *)resolveDestDir {
-    if (self.outputDir) return [NSURL fileURLWithPath:self.outputDir];
-    if (self.output)    return [[NSURL fileURLWithPath:self.output] URLByDeletingLastPathComponent];
+    if (self.artifactsDir.length) return [NSURL fileURLWithPath:self.artifactsDir];
+    if (self.mediaOutput.length) return [[NSURL fileURLWithPath:self.mediaOutput] URLByDeletingLastPathComponent];
     return [NSURL fileURLWithPath:[[NSFileManager defaultManager] currentDirectoryPath]];
 }
 
-/// Returns the media file URL. If --output is given that path is used directly;
-/// otherwise an auto-named file is placed in resolveDestDir.
 - (NSURL *)resolveMediaURLWithName:(NSString *)autoName {
-    if (self.output) return [NSURL fileURLWithPath:self.output];
+    if (self.mediaOutput.length) return [NSURL fileURLWithPath:self.mediaOutput];
     return [[self resolveDestDir] URLByAppendingPathComponent:autoName];
 }
 
 - (BOOL)saveResult:(NSDictionary *)result mediaURL:(NSURL *)mediaURL error:(NSError **)error {
-    // JSON filename = media basename with .json extension, in the same dir
-    NSString *jsonName = [mediaURL.lastPathComponent.stringByDeletingPathExtension
-                          stringByAppendingPathExtension:@"json"];
-    NSURL *jsonURL = [mediaURL.URLByDeletingLastPathComponent URLByAppendingPathComponent:jsonName];
-    return CWriteJSON(result, jsonURL, error);
+    NSArray *arts = mediaURL.path.length ? @[MVArtifactEntry(mediaURL.path, @"media")] : @[];
+    NSDictionary *merged = MVResultByMergingArtifacts(result, arts);
+    NSDictionary *env = MVMakeEnvelope(@"capture", self.operation, mediaURL.path, merged);
+    return MVEmitEnvelope(env, self.jsonOutput, error);
 }
 
 // ── screenshot ────────────────────────────────────────────────────────────────

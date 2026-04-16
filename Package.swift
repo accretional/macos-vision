@@ -11,6 +11,9 @@ let package = Package(
         .executableTarget(
             name: "macos-vision",
             path: "Sources",
+            cSettings: [
+                .headerSearchPath("."),
+            ],
             linkerSettings: [
                 .linkedFramework("Cocoa"),
                 .linkedFramework("Vision"),

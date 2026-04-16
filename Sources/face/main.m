@@ -1,4 +1,5 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 
@@ -75,41 +76,33 @@ static NSString *extensionForFormat(NSString *fmt) {
 
 - (BOOL)runWithError:(NSError **)error {
     NSString *op = self.operation.length ? self.operation : @"face-rectangles";
-    if (self.img) {
-        return [self processImage:self.img outputDir:self.output operation:op error:error];
-    } else if (self.imgDir) {
-        return [self processBatch:self.imgDir outputDir:self.outputDir operation:op error:error];
+    if (!self.inputPath.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorMissingInput
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
+        }
+        return NO;
     }
-    if (error) {
-        *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorMissingInput
-                                userInfo:@{NSLocalizedDescriptionKey: @"Either --img or --img-dir must be provided"}];
-    }
-    return NO;
+    return [self processImage:self.inputPath operation:op error:error];
 }
 
-// ── single image ──────────────────────────────────────────────────────────────
-
-- (BOOL)processImage:(NSString *)imagePath outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-        if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
-    }
+- (BOOL)processImage:(NSString *)imagePath operation:(NSString *)op error:(NSError **)error {
     NSString *base = [[imagePath lastPathComponent] stringByDeletingPathExtension];
 
     if ([op isEqualToString:@"face-rectangles"])
-        return [self runFaceRectangles:imagePath base:base outputDir:outputDir error:error];
+        return [self runFaceRectangles:imagePath base:base error:error];
     if ([op isEqualToString:@"face-landmarks"])
-        return [self runFaceLandmarks:imagePath base:base outputDir:outputDir error:error];
+        return [self runFaceLandmarks:imagePath base:base error:error];
     if ([op isEqualToString:@"face-quality"])
-        return [self runFaceQuality:imagePath base:base outputDir:outputDir error:error];
+        return [self runFaceQuality:imagePath base:base error:error];
     if ([op isEqualToString:@"human-rectangles"])
-        return [self runHumanRectangles:imagePath base:base outputDir:outputDir error:error];
+        return [self runHumanRectangles:imagePath base:base error:error];
     if ([op isEqualToString:@"body-pose"])
-        return [self runBodyPose:imagePath base:base outputDir:outputDir error:error];
+        return [self runBodyPose:imagePath base:base error:error];
     if ([op isEqualToString:@"hand-pose"])
-        return [self runHandPose:imagePath base:base outputDir:outputDir error:error];
+        return [self runHandPose:imagePath base:base error:error];
     if ([op isEqualToString:@"animal-pose"])
-        return [self runAnimalPose:imagePath base:base outputDir:outputDir error:error];
+        return [self runAnimalPose:imagePath base:base error:error];
 
     if (error) {
         *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorMissingInput
@@ -119,31 +112,9 @@ static NSString *extensionForFormat(NSString *fmt) {
     return NO;
 }
 
-// ── batch mode ────────────────────────────────────────────────────────────────
-
-- (BOOL)processBatch:(NSString *)imgDir outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-        if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
-    }
-    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:imgDir];
-    NSMutableArray<NSString *> *imageFiles = [NSMutableArray array];
-    NSString *filePath;
-    while ((filePath = [enumerator nextObject])) {
-        if ([self isImageFile:filePath]) [imageFiles addObject:filePath];
-    }
-    [imageFiles sortUsingSelector:@selector(compare:)];
-
-    for (NSString *relativePath in imageFiles) {
-        NSString *fullPath = [imgDir stringByAppendingPathComponent:relativePath];
-        if (![self processImage:fullPath outputDir:outputDir operation:op error:error]) return NO;
-    }
-    return YES;
-}
-
 // ── face-rectangles (VNDetectFaceRectanglesRequest) ───────────────────────────
 
-- (BOOL)runFaceRectangles:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runFaceRectangles:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -169,17 +140,18 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
 
     NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"face-rectangles", @"faces": faces};
-    if (![self saveJSON:json base:base suffix:@"face_rectangles" outputDir:outputDir imagePath:imagePath error:error]) return NO;
+    NSMutableArray *artifactEntries = [NSMutableArray array];
     if (self.debug && debugBoxes.count > 0) {
-        NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"face_rectangles"];
-        [self drawDebug:imagePath boxes:debugBoxes points:@[] toPath:dbgPath error:nil];
+        NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"face_rectangles"];
+        if ([self drawDebug:imagePath boxes:debugBoxes points:@[] toPath:dbgPath error:nil])
+            [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
     }
-    return YES;
+    return [self saveJSON:json artifactEntries:artifactEntries error:error];
 }
 
 // ── face-landmarks (VNDetectFaceLandmarksRequest) ─────────────────────────────
 
-- (BOOL)runFaceLandmarks:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runFaceLandmarks:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -236,17 +208,18 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
 
     NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"face-landmarks", @"faces": faces};
-    if (![self saveJSON:json base:base suffix:@"face_landmarks" outputDir:outputDir imagePath:imagePath error:error]) return NO;
+    NSMutableArray *artifactEntries = [NSMutableArray array];
     if (self.debug && (debugBoxes.count > 0 || debugPoints.count > 0)) {
-        NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"face_landmarks"];
-        [self drawDebug:imagePath boxes:debugBoxes points:debugPoints toPath:dbgPath error:nil];
+        NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"face_landmarks"];
+        if ([self drawDebug:imagePath boxes:debugBoxes points:debugPoints toPath:dbgPath error:nil])
+            [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
     }
-    return YES;
+    return [self saveJSON:json artifactEntries:artifactEntries error:error];
 }
 
 // ── face-quality (VNDetectFaceCaptureQualityRequest) ──────────────────────────
 
-- (BOOL)runFaceQuality:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runFaceQuality:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -275,17 +248,18 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
 
     NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"face-quality", @"faces": faces};
-    if (![self saveJSON:json base:base suffix:@"face_quality" outputDir:outputDir imagePath:imagePath error:error]) return NO;
+    NSMutableArray *artifactEntries = [NSMutableArray array];
     if (self.debug && debugBoxes.count > 0) {
-        NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"face_quality"];
-        [self drawDebug:imagePath boxes:debugBoxes points:@[] toPath:dbgPath error:nil];
+        NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"face_quality"];
+        if ([self drawDebug:imagePath boxes:debugBoxes points:@[] toPath:dbgPath error:nil])
+            [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
     }
-    return YES;
+    return [self saveJSON:json artifactEntries:artifactEntries error:error];
 }
 
 // ── human-rectangles (VNDetectHumanRectanglesRequest, macOS 11+) ──────────────
 
-- (BOOL)runHumanRectangles:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runHumanRectangles:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     if (@available(macOS 12.0, *)) {
         CGImageRef cg = [self loadCGImage:imagePath error:error];
         if (!cg) return NO;
@@ -315,12 +289,13 @@ static NSString *extensionForFormat(NSString *fmt) {
         }
 
         NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"human-rectangles", @"humans": humans};
-        if (![self saveJSON:json base:base suffix:@"human_rectangles" outputDir:outputDir imagePath:imagePath error:error]) return NO;
+        NSMutableArray *artifactEntries = [NSMutableArray array];
         if (self.debug && debugBoxes.count > 0) {
-            NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"human_rectangles"];
-            [self drawDebug:imagePath boxes:debugBoxes points:@[] toPath:dbgPath error:nil];
+            NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"human_rectangles"];
+            if ([self drawDebug:imagePath boxes:debugBoxes points:@[] toPath:dbgPath error:nil])
+                [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
         }
-        return YES;
+        return [self saveJSON:json artifactEntries:artifactEntries error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"human-rectangles requires macOS 12.0+"}];
@@ -330,7 +305,7 @@ static NSString *extensionForFormat(NSString *fmt) {
 
 // ── body-pose (VNDetectHumanBodyPoseRequest, macOS 11+) ───────────────────────
 
-- (BOOL)runBodyPose:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runBodyPose:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     if (@available(macOS 11.0, *)) {
         CGImageRef cg = [self loadCGImage:imagePath error:error];
         if (!cg) return NO;
@@ -367,12 +342,13 @@ static NSString *extensionForFormat(NSString *fmt) {
         }
 
         NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"body-pose", @"bodies": bodies};
-        if (![self saveJSON:json base:base suffix:@"body_pose" outputDir:outputDir imagePath:imagePath error:error]) return NO;
+        NSMutableArray *artifactEntries = [NSMutableArray array];
         if (self.debug && debugPoints.count > 0) {
-            NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"body_pose"];
-            [self drawDebug:imagePath boxes:@[] points:debugPoints toPath:dbgPath error:nil];
+            NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"body_pose"];
+            if ([self drawDebug:imagePath boxes:@[] points:debugPoints toPath:dbgPath error:nil])
+                [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
         }
-        return YES;
+        return [self saveJSON:json artifactEntries:artifactEntries error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"body-pose requires macOS 11.0+"}];
@@ -382,7 +358,7 @@ static NSString *extensionForFormat(NSString *fmt) {
 
 // ── hand-pose (VNDetectHumanHandPoseRequest, macOS 11+) ───────────────────────
 
-- (BOOL)runHandPose:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runHandPose:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     if (@available(macOS 11.0, *)) {
         CGImageRef cg = [self loadCGImage:imagePath error:error];
         if (!cg) return NO;
@@ -428,12 +404,13 @@ static NSString *extensionForFormat(NSString *fmt) {
         }
 
         NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"hand-pose", @"hands": hands};
-        if (![self saveJSON:json base:base suffix:@"hand_pose" outputDir:outputDir imagePath:imagePath error:error]) return NO;
+        NSMutableArray *artifactEntries = [NSMutableArray array];
         if (self.debug && debugPoints.count > 0) {
-            NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"hand_pose"];
-            [self drawDebug:imagePath boxes:@[] points:debugPoints toPath:dbgPath error:nil];
+            NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"hand_pose"];
+            if ([self drawDebug:imagePath boxes:@[] points:debugPoints toPath:dbgPath error:nil])
+                [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
         }
-        return YES;
+        return [self saveJSON:json artifactEntries:artifactEntries error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"hand-pose requires macOS 11.0+"}];
@@ -443,7 +420,7 @@ static NSString *extensionForFormat(NSString *fmt) {
 
 // ── animal-pose (VNDetectAnimalBodyPoseRequest, macOS 14+) ────────────────────
 
-- (BOOL)runAnimalPose:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runAnimalPose:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     if (@available(macOS 14.0, *)) {
         CGImageRef cg = [self loadCGImage:imagePath error:error];
         if (!cg) return NO;
@@ -480,12 +457,13 @@ static NSString *extensionForFormat(NSString *fmt) {
         }
 
         NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"animal-pose", @"animals": animals};
-        if (![self saveJSON:json base:base suffix:@"animal_pose" outputDir:outputDir imagePath:imagePath error:error]) return NO;
+        NSMutableArray *artifactEntries = [NSMutableArray array];
         if (self.debug && debugPoints.count > 0) {
-            NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"animal_pose"];
-            [self drawDebug:imagePath boxes:@[] points:debugPoints toPath:dbgPath error:nil];
+            NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"animal_pose"];
+            if ([self drawDebug:imagePath boxes:@[] points:debugPoints toPath:dbgPath error:nil])
+                [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
         }
-        return YES;
+        return [self saveJSON:json artifactEntries:artifactEntries error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"animal-pose requires macOS 14.0+"}];
@@ -515,38 +493,21 @@ static NSString *extensionForFormat(NSString *fmt) {
 }
 
 - (NSDictionary *)imageInfo:(NSString *)imagePath {
-    NSString *abs = [imagePath hasPrefix:@"/"]
-        ? imagePath
-        : [[NSFileManager defaultManager].currentDirectoryPath stringByAppendingPathComponent:imagePath];
     NSImage *img = [[NSImage alloc] initByReferencingFile:imagePath];
     CGImageRef cg = img ? [img CGImageForProposedRect:nil context:nil hints:nil] : NULL;
     return @{
         @"filename": [imagePath lastPathComponent],
-        @"filepath": abs,
+        @"filepath": MVRelativePath(imagePath),
         @"width":    @(cg ? CGImageGetWidth(cg)  : 0),
         @"height":   @(cg ? CGImageGetHeight(cg) : 0),
     };
 }
 
-- (BOOL)saveJSON:(NSDictionary *)json
-            base:(NSString *)base
-          suffix:(NSString *)suffix
-       outputDir:(nullable NSString *)outputDir
-       imagePath:(NSString *)imagePath
-           error:(NSError **)error {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:json options:NSJSONWritingPrettyPrinted error:error];
-    if (!data) return NO;
-    NSString *str = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-
-    if (outputDir) {
-        NSString *filename = [NSString stringWithFormat:@"%@_%@.json", base, suffix];
-        NSString *path = [outputDir stringByAppendingPathComponent:filename];
-        if (![str writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:error]) return NO;
-        printf("Saved: %s\n", path.UTF8String);
-    } else {
-        printf("%s\n", str.UTF8String);
-    }
-    return YES;
+- (BOOL)saveJSON:(NSDictionary *)json artifactEntries:(NSArray<NSDictionary *> *)artifactEntries error:(NSError **)error {
+    NSString *op = json[@"operation"] ?: @"face";
+    NSDictionary *merged = MVResultByMergingArtifacts(json, artifactEntries ?: @[]);
+    NSDictionary *envelope = MVMakeEnvelope(@"face", op, self.inputPath, merged);
+    return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
 // boxes: NSRect values in top-left normalized coords; points: NSPoint values in top-left normalized coords
@@ -557,6 +518,14 @@ static NSString *extensionForFormat(NSString *fmt) {
             error:(NSError **)error {
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:imagePath];
     if (!image) return NO;
+
+    NSString *parent = outputPath.stringByDeletingLastPathComponent;
+    if (parent.length) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:parent
+                                    withIntermediateDirectories:YES
+                                                     attributes:nil
+                                                          error:nil];
+    }
 
     NSSize size = image.size;
     NSImage *out = [[NSImage alloc] initWithSize:size];
@@ -603,20 +572,15 @@ static NSString *extensionForFormat(NSString *fmt) {
     // Replace path extension with chosen format
     NSString *finalPath = [[outputPath stringByDeletingPathExtension] stringByAppendingPathExtension:ext];
     if (![imgData writeToFile:finalPath options:NSDataWritingAtomic error:error]) return NO;
-    printf("Debug image saved to: %s\n", finalPath.UTF8String);
+    fprintf(stderr, "Debug image saved to: %s\n", finalPath.UTF8String);
     return YES;
 }
 
-- (NSString *)debugPath:(NSString *)imagePath base:(NSString *)base suffix:(NSString *)suffix {
-    NSString *dir = [imagePath stringByDeletingLastPathComponent];
+- (NSString *)debugOutputPath:(NSString *)imagePath base:(NSString *)base suffix:(NSString *)suffix {
+    NSString *dir = self.artifactsDir.length ? self.artifactsDir : [imagePath stringByDeletingLastPathComponent];
     NSString *fmt = self.boxesFormat.length ? self.boxesFormat : @"png";
     NSString *filename = [NSString stringWithFormat:@"%@_%@_boxes.%@", base, suffix, extensionForFormat(fmt)];
     return [dir stringByAppendingPathComponent:filename];
-}
-
-- (BOOL)isImageFile:(NSString *)filePath {
-    NSArray<NSString *> *extensions = @[@"jpg", @"jpeg", @"png", @"webp"];
-    return [extensions containsObject:[filePath.pathExtension lowercaseString]];
 }
 
 @end

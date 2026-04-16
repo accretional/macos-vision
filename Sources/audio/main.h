@@ -4,23 +4,24 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface AudioProcessor : NSObject
 
-// Input
-@property (nonatomic, copy, nullable) NSString *audio;
-@property (nonatomic, copy, nullable) NSString *audioDir;
+/// Audio file path, or a directory for `shazam-build` only.
+@property (nonatomic, copy, nullable) NSString *inputPath;
+/// JSON envelope output path, or stdout when omitted.
+@property (nonatomic, copy, nullable) NSString *jsonOutput;
+/// Directory for `isolate` output audio, optional Shazam catalog parent, etc.
+@property (nonatomic, copy, nullable) NSString *artifactsDir;
 // Operation: transcribe | classify | shazam | detect | noise | pitch | isolate | shazam-custom | shazam-build
 @property (nonatomic, copy) NSString *operation;
-// Output
-@property (nonatomic, copy, nullable) NSString *output;
-@property (nonatomic, copy, nullable) NSString *outputDir;
-// Options
-@property (nonatomic, copy) NSString *lang;         // e.g. en-US (default)
-@property (nonatomic, assign) BOOL offline;          // force on-device recognition
-@property (nonatomic, assign) NSInteger topk;        // top-K results for classify (default 3)
-@property (nonatomic, assign) BOOL merge;            // merge directory results into one JSON
-@property (nonatomic, assign) BOOL debug;            // emit processing_ms in output
-// shazam-custom: path to a .shazamcatalog file built with shazam-build
+@property (nonatomic, copy) NSString *lang;
+@property (nonatomic, assign) BOOL offline;
+@property (nonatomic, assign) NSInteger topk;
+@property (nonatomic, assign) BOOL classifyWindowDurationSet;
+@property (nonatomic, assign) NSTimeInterval classifyWindowDuration;
+@property (nonatomic, assign) BOOL classifyOverlapFactorSet;
+@property (nonatomic, assign) double classifyOverlapFactor;
+@property (nonatomic, assign) NSInteger pitchHopFrames;
+@property (nonatomic, assign) BOOL debug;
 @property (nonatomic, copy, nullable) NSString *catalog;
-// Streaming modes
 @property (nonatomic, assign) BOOL mic;
 
 - (BOOL)runWithError:(NSError **)error;

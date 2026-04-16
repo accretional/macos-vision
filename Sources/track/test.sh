@@ -18,11 +18,11 @@ fi
 # ── error handling ────────────────────────────────────────────────────────────
 echo "── track: error handling ────────────────────────────────────────────────────"
 err=$("$BINARY" track 2>&1 || true)
-echo "$err" | grep -qi "video\|img-dir\|must be provided\|error" && pass "track: missing input error shown" || fail "track: no error on missing input"
-err=$("$BINARY" track --video /nonexistent/video.mp4 2>&1 || true)
-echo "$err" | grep -qi "not found\|error\|failed" && pass "track: missing video error shown" || fail "track: missing video not rejected"
+echo "$err" | grep -qiE "video|input|must be provided|provide|error" && pass "track: missing input error shown" || fail "track: no error on missing input"
+err=$("$BINARY" track --input /nonexistent/video.mp4 2>&1 || true)
+echo "$err" | grep -qi "not found\|error\|failed" && pass "track: missing input error shown" || fail "track: missing input not rejected"
 if $has_frames; then
-    err=$("$BINARY" track --img-dir "$FRAMES" --operation bad-op 2>&1 || true)
+    err=$("$BINARY" track --input "$FRAMES" --operation bad-op 2>&1 || true)
     echo "$err" | grep -qi "unknown\|supported\|error" && pass "track: unknown operation rejected" || fail "track: unknown operation not rejected"
 fi
 echo
@@ -30,12 +30,12 @@ echo
 # ── homographic ───────────────────────────────────────────────────────────────
 echo "── track: homographic ───────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --img-dir "$FRAMES" --operation homographic --output "$TMP"
-    got="$TMP/homographic.json"
+    "$BINARY" track --input "$FRAMES" --operation homographic --output "$TMP"
+    got="$TMP/track_homographic.json"
     if [ -f "$got" ]; then
         pass "homographic: output produced"
         jq empty "$got" 2>/dev/null && pass "homographic: valid JSON" || fail "homographic: invalid JSON"
-        jq -e '.frames' "$got" >/dev/null 2>&1 && pass "homographic: frames field present" || fail "homographic: frames field missing"
+        jq -e '.result.frames' "$got" >/dev/null 2>&1 && pass "homographic: frames field present" || fail "homographic: frames field missing"
     else
         fail "homographic: output not produced"
     fi
@@ -47,12 +47,12 @@ echo
 # ── translational ─────────────────────────────────────────────────────────────
 echo "── track: translational ─────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --img-dir "$FRAMES" --operation translational --output "$TMP"
-    got="$TMP/translational.json"
+    "$BINARY" track --input "$FRAMES" --operation translational --output "$TMP"
+    got="$TMP/track_translational.json"
     if [ -f "$got" ]; then
         pass "translational: output produced"
         jq empty "$got" 2>/dev/null && pass "translational: valid JSON" || fail "translational: invalid JSON"
-        jq -e '.frames' "$got" >/dev/null 2>&1 && pass "translational: frames field present" || fail "translational: frames field missing"
+        jq -e '.result.frames' "$got" >/dev/null 2>&1 && pass "translational: frames field present" || fail "translational: frames field missing"
     else
         fail "translational: output not produced"
     fi
@@ -64,12 +64,12 @@ echo
 # ── trajectories ──────────────────────────────────────────────────────────────
 echo "── track: trajectories ──────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --img-dir "$FRAMES" --operation trajectories --output "$TMP"
-    got="$TMP/trajectories.json"
+    "$BINARY" track --input "$FRAMES" --operation trajectories --output "$TMP"
+    got="$TMP/track_trajectories.json"
     if [ -f "$got" ]; then
         pass "trajectories: output produced"
         jq empty "$got" 2>/dev/null && pass "trajectories: valid JSON" || fail "trajectories: invalid JSON"
-        jq -e '.trajectories' "$got" >/dev/null 2>&1 && pass "trajectories: trajectories field present" || fail "trajectories: trajectories field missing"
+        jq -e '.result.trajectories' "$got" >/dev/null 2>&1 && pass "trajectories: trajectories field present" || fail "trajectories: trajectories field missing"
     else
         fail "trajectories: output not produced"
     fi

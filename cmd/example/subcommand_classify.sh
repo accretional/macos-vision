@@ -2,12 +2,31 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="$ROOT/.build/debug/macos-vision"
-IMG="$ROOT/sample_data/input/images"
-OUTPUT="$ROOT/sample_data/output/classify"
 
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"; export ROOT
+eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'export {k}="{root}/{v}"') for k,v in json.load(open(f)).items()]" "$ROOT" "$SCRIPT_DIR/data_files.json")"
+
+OUTPUT="$ROOT/sample_data/output/classify"
 mkdir -p "$OUTPUT"
+
+# Spatial classify ops → <stem>_<operation>.svg (same layout as `classify --output "$OUTPUT"`).
+overlay_classify() {
+    local img="$1" operation="$2"
+    local stem op json
+    stem=$(basename "$img"); stem="${stem%.*}"
+    op="${operation//-/_}"
+    json="$OUTPUT/${stem}_${op}.json"
+    if [ ! -f "$json" ]; then
+        echo "  SKIP  overlay ($json not found)"
+        return
+    fi
+    if [ ! -f "$img" ]; then
+        echo "  SKIP  overlay (source image missing)"
+        return
+    fi
+    echo "  RUN   overlay ${stem}_${op}.svg"
+    "$BINARY" overlay --json "$json" --input "$img" --output "$OUTPUT"
+}
 
 run() {
     local label="$1" img="$2"; shift 2
@@ -20,43 +39,45 @@ run() {
 }
 
 # ── classify (no SVG — image-level labels only, no spatial data) ──────────────
-run "classify" "$IMG/gorilla.jpg" \
-    "$BINARY" classify --img "$IMG/gorilla.jpg" \
+run "classify" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
                        --operation classify \
                        --output "$OUTPUT"
 
 # ── animals ───────────────────────────────────────────────────────────────────
-run "animals" "$IMG/cat_side_eye.jpg" \
-    "$BINARY" classify --img "$IMG/cat_side_eye.jpg" \
+run "animals" "$EXAMPLE_IMG_CAT_SIDE_EYE" \
+    "$BINARY" classify --input "$EXAMPLE_IMG_CAT_SIDE_EYE" \
                        --operation animals \
-                       --output "$OUTPUT" 
+                       --output "$OUTPUT"
+overlay_classify "$EXAMPLE_IMG_CAT_SIDE_EYE" animals
 
 # ── rectangles ────────────────────────────────────────────────────────────────
-run "rectangles" "$IMG/document.jpg" \
-    "$BINARY" classify --img "$IMG/document.jpg" \
+run "rectangles" "$EXAMPLE_IMG_DOCUMENT" \
+    "$BINARY" classify --input "$EXAMPLE_IMG_DOCUMENT" \
                        --operation rectangles \
-                       --output "$OUTPUT" 
+                       --output "$OUTPUT"
+overlay_classify "$EXAMPLE_IMG_DOCUMENT" rectangles
 
 # ── horizon ───────────────────────────────────────────────────────────────────
-run "horizon" "$IMG/sad_pablo.png" \
-    "$BINARY" classify --img "$IMG/sad_pablo.png" \
+run "horizon" "$EXAMPLE_IMG_SAD_PABLO" \
+    "$BINARY" classify --input "$EXAMPLE_IMG_SAD_PABLO" \
                        --operation horizon \
-                       --output "$OUTPUT" 
+                       --output "$OUTPUT"
 
 # ── contours (no SVG — count + aspect ratios only, no coordinates) ────────────
-run "contours" "$IMG/gorilla.jpg" \
-    "$BINARY" classify --img "$IMG/gorilla.jpg" \
+run "contours" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
                        --operation contours \
                        --output "$OUTPUT"
 
 # ── aesthetics (no SVG — score only) ─────────────────────────────────────────
-run "aesthetics" "$IMG/gorilla.jpg" \
-    "$BINARY" classify --img "$IMG/gorilla.jpg" \
+run "aesthetics" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
                        --operation aesthetics \
                        --output "$OUTPUT"
 
 # ── feature-print (no SVG — embedding vector only) ────────────────────────────
-run "feature-print" "$IMG/gorilla.jpg" \
-    "$BINARY" classify --img "$IMG/gorilla.jpg" \
+run "feature-print" "$EXAMPLE_IMG_GORILLA" \
+    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
                        --operation feature-print \
                        --output "$OUTPUT"

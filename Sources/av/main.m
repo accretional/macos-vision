@@ -1,4 +1,5 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
 
@@ -24,16 +25,36 @@ typedef NS_ENUM(NSInteger, AVProcessorErrorCode) {
     AVProcessorErrorTTSFailed        = 17,
 };
 
+static NSArray<NSDictionary *> *MAVCollectArtifacts(NSDictionary *obj) {
+    NSMutableArray *a = [NSMutableArray array];
+    NSString *out = obj[@"output"];
+    if ([out isKindOfClass:[NSString class]] && out.length)
+        [a addObject:MVArtifactEntry(out, @"media_output")];
+    id thumbs = obj[@"thumbnails"];
+    if ([thumbs isKindOfClass:[NSArray class]]) {
+        for (id t in thumbs) {
+            if ([t isKindOfClass:[NSDictionary class]] && [t[@"path"] isKindOfClass:[NSString class]])
+                [a addObject:MVArtifactEntry(t[@"path"], @"thumbnail")];
+        }
+    }
+    NSString *p = obj[@"path"];
+    if ([p isKindOfClass:[NSString class]] && p.length) {
+        BOOL dup = [out isKindOfClass:[NSString class]] && [out isEqualToString:p];
+        if (!dup) [a addObject:MVArtifactEntry(p, @"thumbnail")];
+    }
+    return a;
+}
+
 static void MPrintJSON(id obj) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:nil];
     if (data) printf("%s\n", [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding].UTF8String);
 }
 
 static BOOL MWriteJSON(id obj, NSURL *url, NSError **error) {
     NSData *data = [NSJSONSerialization dataWithJSONObject:obj
-                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                      error:error];
     if (!data) return NO;
     [[NSFileManager defaultManager] createDirectoryAtURL:url.URLByDeletingLastPathComponent
@@ -105,6 +126,79 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
     return d;
 }
 
+/// Write TTS PCM buffers to linear PCM WAV (used for direct .wav output and as an intermediate for AAC).
+static BOOL MTTSWritePCMSequenceToWAV(NSArray<AVAudioPCMBuffer *> *buffers,
+                                       AVAudioFormat *outputFormat,
+                                       NSURL *wavURL,
+                                       NSError **error) {
+    NSDictionary *pcmSettings = @{
+        AVFormatIDKey: @(kAudioFormatLinearPCM),
+        AVSampleRateKey: @(outputFormat.sampleRate),
+        AVNumberOfChannelsKey: @(outputFormat.channelCount),
+        AVLinearPCMBitDepthKey: @16,
+        AVLinearPCMIsFloatKey: @NO,
+        AVLinearPCMIsBigEndianKey: @NO,
+    };
+    NSError *fe = nil;
+    AVAudioFile *file = [[AVAudioFile alloc] initForWriting:wavURL settings:pcmSettings error:&fe];
+    if (!file) {
+        if (error) *error = fe;
+        return NO;
+    }
+    for (AVAudioPCMBuffer *buf in buffers) {
+        NSError *we = nil;
+        if (![file writeFromBuffer:buf error:&we]) {
+            if (error) *error = we;
+            return NO;
+        }
+    }
+    return YES;
+}
+
+/// Encode WAV to AAC in MPEG-4 (.m4a) for browser `<audio>` / MediaSource compatibility.
+static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
+    [[NSFileManager defaultManager] removeItemAtURL:m4aURL error:nil];
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:wavURL options:nil];
+    MWaitAssetKeys(asset, @[@"tracks", @"duration"]);
+    NSArray *ok = [AVAssetExportSession exportPresetsCompatibleWithAsset:asset];
+    NSString *preset = AVAssetExportPresetAppleM4A;
+    if (![ok containsObject:preset]) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorPresetIncompat
+                             userInfo:@{NSLocalizedDescriptionKey:
+                                            @"Intermediate WAV is not compatible with the Apple M4A export preset"}];
+        return NO;
+    }
+    AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:asset presetName:preset];
+    if (!session) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorSessionCreate
+                             userInfo:@{NSLocalizedDescriptionKey: @"Could not create TTS M4A export session"}];
+        return NO;
+    }
+    session.outputURL = m4aURL;
+    NSString *fileType = session.supportedFileTypes.firstObject;
+    if (!fileType) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorNoFileTypes
+                             userInfo:@{NSLocalizedDescriptionKey: @"TTS M4A export: no supported output file types"}];
+        return NO;
+    }
+    session.outputFileType = fileType;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    __block BOOL completed = NO;
+    [session exportAsynchronouslyWithCompletionHandler:^{
+        completed = (session.status == AVAssetExportSessionStatusCompleted);
+        dispatch_semaphore_signal(sem);
+    }];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 3600 * NSEC_PER_SEC));
+    if (!completed) {
+        if (error) *error = session.error ?: [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportFailed
+                                                userInfo:@{NSLocalizedDescriptionKey:
+                                                               [NSString stringWithFormat:@"TTS AAC/M4A export failed (status %ld)",
+                                                                                                  (long)session.status]}];
+        return NO;
+    }
+    return YES;
+}
+
 @implementation AVProcessor
 
 - (instancetype)init {
@@ -143,7 +237,7 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
         isImage = YES;
     } else {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:2
-                             userInfo:@{NSLocalizedDescriptionKey: @"Provide --video or --img"}];
+                             userInfo:@{NSLocalizedDescriptionKey: @"Provide --input"}];
         return NO;
     }
 
@@ -190,11 +284,13 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
     }
     if (t0) root[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
 
-    if (self.output) {
-        return MWriteJSON(root, [NSURL fileURLWithPath:self.output], error);
+    NSDictionary *merged = MVResultByMergingArtifacts(root, MAVCollectArtifacts(root));
+    NSString *inp = self.video.length ? self.video : (self.img.length ? self.img : nil);
+    NSDictionary *env = MVMakeEnvelope(@"av", @"list-presets", inp.length ? inp : nil, merged);
+    if (self.output.length) {
+        return MVEmitEnvelope(env, self.output, error);
     }
-    MPrintJSON(root);
-    return YES;
+    return MVEmitEnvelope(env, nil, error);
 }
 
 - (BOOL)runInspect:(AVURLAsset *)asset error:(NSError **)error {
@@ -312,8 +408,8 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
     }
 
     NSURL *destDir;
-    if (self.outputDir.length) {
-        destDir = [NSURL fileURLWithPath:self.outputDir];
+    if (self.artifactsDir.length) {
+        destDir = [NSURL fileURLWithPath:self.artifactsDir];
     } else if (self.output.length) {
         destDir = [[NSURL fileURLWithPath:self.output] URLByDeletingLastPathComponent];
     } else {
@@ -340,7 +436,7 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
         NSURL *pngURL = [destDir URLByAppendingPathComponent:name];
         NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
         if (![png writeToURL:pngURL options:NSDataWritingAtomic error:error]) return NO;
-        [written addObject:@{ @"timeSeconds": @(CMTimeGetSeconds(t)), @"path": pngURL.path }];
+        [written addObject:@{ @"timeSeconds": @(CMTimeGetSeconds(t)), @"path": MVRelativePath(pngURL.path) }];
     }
 
     NSMutableDictionary *out = [@{ @"operation": @"thumbnail", @"thumbnails": written } mutableCopy];
@@ -357,8 +453,8 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
         return NO;
     }
     NSURL *destDir;
-    if (self.outputDir.length) {
-        destDir = [NSURL fileURLWithPath:self.outputDir];
+    if (self.artifactsDir.length) {
+        destDir = [NSURL fileURLWithPath:self.artifactsDir];
     } else if (self.output.length) {
         destDir = [[NSURL fileURLWithPath:self.output] URLByDeletingLastPathComponent];
     } else {
@@ -378,14 +474,15 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
     NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
     if (![png writeToURL:outURL options:NSDataWritingAtomic error:error]) return NO;
 
-    NSMutableDictionary *out = [@{ @"operation": @"thumbnail", @"path": outURL.path, @"width": @(rep.pixelsWide), @"height": @(rep.pixelsHigh) } mutableCopy];
+    NSMutableDictionary *out = [@{ @"operation": @"thumbnail", @"path": MVRelativePath(outURL.path), @"width": @(rep.pixelsWide), @"height": @(rep.pixelsHigh) } mutableCopy];
     if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    NSDictionary *merged = MVResultByMergingArtifacts(out, MAVCollectArtifacts(out));
+    NSDictionary *env = MVMakeEnvelope(@"av", @"thumbnail", imgURL.path, merged);
     if (self.output.length) {
         NSString *jsonPath = [[self.output stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
-        return MWriteJSON(out, [NSURL fileURLWithPath:jsonPath], error);
+        return MVEmitEnvelope(env, jsonPath, error);
     }
-    MPrintJSON(out);
-    return YES;
+    return MVEmitEnvelope(env, nil, error);
 }
 
 - (BOOL)runExport:(AVURLAsset *)asset error:(NSError **)error {
@@ -458,7 +555,7 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
 
     NSMutableDictionary *out = [@{
         @"operation": self.operation,
-        @"output": self.output,
+        @"output": MVRelativePath(self.output),
         @"preset": preset,
     } mutableCopy];
     if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
@@ -540,7 +637,7 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
 
     NSMutableDictionary *out = [@{
         @"operation": @"compose",
-        @"output": self.output,
+        @"output": MVRelativePath(self.output),
         @"inputCount": @(assets.count),
         @"durationSeconds": @(CMTimeGetSeconds(comp.duration)),
     } mutableCopy];
@@ -694,46 +791,41 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
         return NO;
     }
 
-    NSURL *outURL = [NSURL fileURLWithPath:self.output];
+    // Browser-friendly default: AAC in MPEG-4 (.m4a). PCM only for explicit .wav / .aif / .aiff.
+    // Extensionless --output gets .m4a
+    NSString *mediaPath = self.output;
+    NSString *ext = mediaPath.pathExtension.lowercaseString;
+    if (!ext.length) {
+        mediaPath = [mediaPath stringByAppendingPathExtension:@"m4a"];
+        ext = @"m4a";
+    } else if ([ext isEqualToString:@"caf"]) {
+        mediaPath = [[mediaPath stringByDeletingPathExtension] stringByAppendingPathExtension:@"m4a"];
+        ext = @"m4a";
+    }
+
+    NSURL *outURL = [NSURL fileURLWithPath:mediaPath];
     [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
                                  withIntermediateDirectories:YES attributes:nil error:nil];
 
-    NSString *ext = self.output.pathExtension.lowercaseString;
-    NSDictionary *settings;
-    if ([ext isEqualToString:@"caf"] || [ext isEqualToString:@"aiff"] ||
-        [ext isEqualToString:@"aif"] || [ext isEqualToString:@"wav"]) {
-        settings = @{
-            AVFormatIDKey: @(kAudioFormatLinearPCM),
-            AVSampleRateKey: @(outputFormat.sampleRate),
-            AVNumberOfChannelsKey: @(outputFormat.channelCount),
-            AVLinearPCMBitDepthKey: @16,
-            AVLinearPCMIsFloatKey: @NO,
-            AVLinearPCMIsBigEndianKey: @NO,
-        };
+    BOOL wantPCM = [ext isEqualToString:@"aiff"] || [ext isEqualToString:@"aif"] || [ext isEqualToString:@"wav"];
+    if (wantPCM) {
+        if (!MTTSWritePCMSequenceToWAV(buffers, outputFormat, outURL, error)) return NO;
     } else {
-        settings = @{
-            AVFormatIDKey: @(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: @(outputFormat.sampleRate),
-            AVNumberOfChannelsKey: @(outputFormat.channelCount),
-            AVEncoderBitRateKey: @(128000),
-        };
-    }
-
-    NSError *fileErr = nil;
-    AVAudioFile *file = [[AVAudioFile alloc] initForWriting:outURL settings:settings error:&fileErr];
-    if (!file) { if (error) *error = fileErr; return NO; }
-
-    for (AVAudioPCMBuffer *buf in buffers) {
-        NSError *writeErr = nil;
-        if (![file writeFromBuffer:buf error:&writeErr]) {
-            if (error) *error = writeErr;
+        // AAC cannot be written incrementally via AVAudioFile; PCM WAV → AVAssetExportSession (browser-safe .m4a).
+        NSString *tmpName = [[NSUUID UUID].UUIDString stringByAppendingPathExtension:@"wav"];
+        NSURL *tmpWav = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:tmpName]];
+        [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+        if (!MTTSWritePCMSequenceToWAV(buffers, outputFormat, tmpWav, error)) return NO;
+        if (!MTTSExportWAVToM4A(tmpWav, outURL, error)) {
+            [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
             return NO;
         }
+        [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
     }
 
     NSMutableDictionary *out = [@{
         @"operation": @"tts",
-        @"output": self.output,
+        @"output": MVRelativePath(mediaPath),
         @"characterCount": @(txt.length),
     } mutableCopy];
     if (self.voice.length) out[@"voice"] = self.voice;
@@ -744,30 +836,30 @@ static NSDictionary *MMetadataItemDict(AVMetadataItem *item) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 - (BOOL)emit:(NSDictionary *)obj error:(NSError **)error {
-    // For operations where --output is a media file, JSON goes alongside it
+    NSString *inp = self.video.length ? self.video : (self.img.length ? self.img : @"");
+    NSDictionary *merged = MVResultByMergingArtifacts(obj, MAVCollectArtifacts(obj));
+    NSDictionary *env = MVMakeEnvelope(@"av", self.operation, inp.length ? inp : nil, merged);
+
     BOOL isExport = [self.operation isEqualToString:@"export"] ||
                     [self.operation isEqualToString:@"export-audio"] ||
                     [self.operation isEqualToString:@"compose"] ||
                     [self.operation isEqualToString:@"tts"];
     if (isExport && self.output) {
         NSString *jsonPath = [[self.output stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
-        return MWriteJSON(obj, [NSURL fileURLWithPath:jsonPath], error);
+        return MVEmitEnvelope(env, jsonPath, error);
     }
-    // --output-dir: write <source-basename>.json into the directory
-    if (self.outputDir) {
+    if (self.artifactsDir.length) {
         NSString *src = self.video.length ? self.video : self.img;
         NSString *base = src.length
             ? [[src.lastPathComponent stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"]
             : [NSString stringWithFormat:@"%@.json", self.operation];
-        NSURL *outURL = [[NSURL fileURLWithPath:self.outputDir] URLByAppendingPathComponent:base];
-        return MWriteJSON(obj, outURL, error);
+        NSString *path = [self.artifactsDir stringByAppendingPathComponent:base];
+        return MVEmitEnvelope(env, path, error);
     }
-    // --output: write JSON directly to that path
     if (self.output) {
-        return MWriteJSON(obj, [NSURL fileURLWithPath:self.output], error);
+        return MVEmitEnvelope(env, self.output, error);
     }
-    MPrintJSON(obj);
-    return YES;
+    return MVEmitEnvelope(env, nil, error);
 }
 
 @end

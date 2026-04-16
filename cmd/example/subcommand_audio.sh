@@ -2,9 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="$ROOT/.build/debug/macos-vision"
-AUDIO_DIR="$ROOT/sample_data/input/audio"
+
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"; export ROOT
+eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'export {k}="{root}/{v}"') for k,v in json.load(open(f)).items()]" "$ROOT" "$SCRIPT_DIR/data_files.json")"
+
 OUTPUT="$ROOT/sample_data/output/audio"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -23,11 +24,10 @@ run() {
     "$@"
 }
 
-# run only when a real sample file exists
 run_file() {
     local label="$1" audio_file="$2"; shift 2
     if [ ! -f "$audio_file" ]; then
-        echo "  SKIP  $label ($(basename "$audio_file") not found in sample_data/input/audio)"
+        echo "  SKIP  $label ($audio_file not found)"
         return
     fi
     echo "  RUN   $label"
@@ -40,66 +40,59 @@ filename_base() {
 }
 
 # ── resolve per-operation audio sources ───────────────────────────────────────
-# Use sample_data files when present; fall back to synthetic voice
-speech_audio="${AUDIO_DIR}/kazoo_kid_who_are_you.wav"
+speech_audio="$EXAMPLE_AUDIO_SPEECH"
 [ -f "$speech_audio" ] || speech_audio="$SYNTH"
 
-tone_audio="${AUDIO_DIR}/tone.aiff"
-[ -f "$tone_audio" ] || tone_audio="$SYNTH"
-
-music_audio="${AUDIO_DIR}/music.m4a"    # preferred for shazam (needs a real song)
-sounds_audio="${AUDIO_DIR}/sounds.wav"  # preferred for detect (event sounds)
+music_audio="$EXAMPLE_AUDIO_MUSIC"
+sounds_audio="$EXAMPLE_AUDIO_SOUNDS"
 
 SYNTH_BASE="$(filename_base "$SYNTH")"
-TONE_BASE="$(filename_base "$tone_audio")"
 MUSIC_BASE="$(filename_base "$music_audio")"
 SOUNDS_BASE="$(filename_base "$sounds_audio")"
 SPEECH_BASE="$(filename_base "$speech_audio")"
+
 # ── classify (default operation) ────────────────────────────────────────────
-run_file "classify" "$SYNTH" \
-    "$BINARY" audio --audio "$SYNTH" \
+run_file "classify" "$speech_audio" \
+    "$BINARY" audio --input "$speech_audio" \
                     --operation classify \
-                    --output "$OUTPUT/${SYNTH_BASE}_classify.json"
+                    --output "$OUTPUT/${SPEECH_BASE}_classify.json"
 
 # ── noise ─────────────────────────────────────────────────────────────────────
-run_file "noise" "$SYNTH" \
-    "$BINARY" audio --audio "$SYNTH" \
+run_file "noise" "$speech_audio" \
+    "$BINARY" audio --input "$speech_audio" \
                     --operation noise \
-                    --output "$OUTPUT/${SYNTH_BASE}_noise.json"
+                    --output "$OUTPUT/${SPEECH_BASE}_noise.json"
 
 # ── pitch ───────────────────────────────────────────────────────────────────
-run_file "pitch" "$tone_audio" \
-    "$BINARY" audio --audio "$tone_audio" \
+run_file "pitch" "$speech_audio" \
+    "$BINARY" audio --input "$speech_audio" \
                     --operation pitch \
-                    --output "$OUTPUT/${TONE_BASE}_pitch.json"
+                    --pitch-hop 8192 \
+                    --output "$OUTPUT/${SPEECH_BASE}_pitch.json"
 
 # ── shazam ──────────────────────────────────────────────────────────────────
-# Requires a real music file; synth voice cannot produce a Shazam match
 run_file "shazam" "$music_audio" \
-    "$BINARY" audio --audio "$music_audio" \
+    "$BINARY" audio --input "$music_audio" \
                     --operation shazam \
                     --output "$OUTPUT/${MUSIC_BASE}_shazam.json"
 
 # ── detect ────────────────────────────────────────────────────────────────────
-# Filters for: alarm, siren, dog, cat, baby, crying, scream, glass.
-# Requires sounds.wav with real event audio; synth voice yields empty results.
 run_file "detect" "$sounds_audio" \
-    "$BINARY" audio --audio "$sounds_audio" \
+    "$BINARY" audio --input "$sounds_audio" \
                     --operation detect \
                     --output "$OUTPUT/${SOUNDS_BASE}_detect.json"
 
 # ── isolate ───────────────────────────────────────────────────────────────────
 run_file "isolate" "$speech_audio" \
-    "$BINARY" audio --audio "$speech_audio" \
+    "$BINARY" audio --input "$speech_audio" \
                     --operation isolate \
                     --output "$OUTPUT/${SPEECH_BASE}_isolate.json"
 
 # ── transcribe ────────────────────────────────────────────────────────────────
-# Requires Speech Recognition permission; falls back gracefully if not granted.
 if [ -f "$speech_audio" ]; then
     echo "  RUN   transcribe"
     set +e
-    "$BINARY" audio --audio "$speech_audio" \
+    "$BINARY" audio --input "$speech_audio" \
                     --operation transcribe \
                     --output "$OUTPUT/${SPEECH_BASE}_transcribe.json" 2>/dev/null
     transcribe_ec=$?
@@ -110,44 +103,11 @@ else
     echo "  SKIP  transcribe ($(basename "$speech_audio") not found)"
 fi
 
-# ── shazam-build ─────────────────────────────────────────────────────────────
-# shazam-build expects --audio pointing at a directory of reference tracks.
-# Uses sample_data/input/audio/catalog/ when it exists; otherwise a temp dir.
-# Writes a .shazamcatalog file next to the --output JSON (same base name).
-catalog_dir="${AUDIO_DIR}/catalog"
-if [ ! -d "$catalog_dir" ]; then
-    catalog_dir="$TMP/catalog"
-    mkdir -p "$catalog_dir"
-    cp "$SYNTH" "$catalog_dir/reference.aiff"
-fi
-run "shazam-build" \
-    "$BINARY" audio --audio "$catalog_dir" \
-                    --operation shazam-build \
-                    --output "$OUTPUT/${SYNTH_BASE}_shazam_build.json"
-
-# ── shazam-custom ─────────────────────────────────────────────────────────────
-# If shazam-build wrote a catalog, use it; otherwise falls back to default Shazam.
-built_catalog="$OUTPUT/example_shazam_build.shazamcatalog"
-if [ -f "$SYNTH" ]; then
-    if [ -f "$built_catalog" ]; then
-        run "shazam-custom (with catalog)" \
-            "$BINARY" audio --audio "$SYNTH" \
-                            --operation shazam-custom \
-                            --catalog "$built_catalog" \
-                            --output "$OUTPUT/${SYNTH_BASE}_shazam_custom.json"
-    else
-        run "shazam-custom (no catalog)" \
-            "$BINARY" audio --audio "$SYNTH" \
-                            --operation shazam-custom \
-                            --output "$OUTPUT/${SYNTH_BASE}_shazam_custom.json"
-    fi
-else
-    echo "  SKIP  shazam-custom (music.m4a not found in sample_data/input/audio)"
-fi
-
-# ── batch + merge ─────────────────────────────────────────────────────────────
-run "batch noise --merge" \
-    bash -c "mkdir -p '$TMP/batch' && cp '$SYNTH' '$TMP/batch/clip.aiff' && \
-             '$BINARY' audio --audio-dir '$TMP/batch' --operation noise \
-                             --output-dir '$OUTPUT/batch' --merge \
-                             --output '$OUTPUT/${SYNTH_BASE}_batch_noise_merged.json'"
+# ── second clip (batch from shell: one input per macos-vision invocation) ─────
+mkdir -p "$TMP/extra"
+cp "$SYNTH" "$TMP/extra/example_clip.aiff"
+EXTRA_CLIP="$TMP/extra/example_clip.aiff"
+run_file "noise (extra clip)" "$EXTRA_CLIP" \
+    "$BINARY" audio --input "$EXTRA_CLIP" \
+                    --operation noise \
+                    --output "$OUTPUT/example_clip_noise.json"
