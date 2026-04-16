@@ -65,14 +65,17 @@ Each Vision subcommand has its own `test.sh` alongside its source code:
 
 ```
 Sources/
-├── classify/test.sh
-├── debug/test.sh
-├── face/test.sh
-├── ocr/test.sh
-├── segment/test.sh
-├── svg/test.sh
-└── track/test.sh
+├── audio/test.sh       ← audio analysis (classify, noise, pitch, detect, shazam, isolate, transcribe)
+├── classify/test.sh    ← image classification, horizon, contours, feature-print
+├── debug/test.sh       ← image metadata
+├── face/test.sh        ← face detection, landmarks, quality, body-pose, human-rectangles
+├── ocr/test.sh         ← text recognition
+├── overlay/test.sh     ← SVG overlay generation (renamed from svg)
+├── segment/test.sh     ← foreground mask segmentation
+└── track/test.sh       ← video tracking (skips gracefully if frames absent)
 ```
+
+Subcommands without tests yet (no `test.sh`): `av`, `capture`, `nl`, `common`.
 
 Each script:
 - Uses a `mktemp -d` temp directory (cleaned up via `trap ... EXIT`)
@@ -88,8 +91,9 @@ Discovers and runs every `Sources/*/test.sh`, aggregates results, and reports a 
 ### Sample data
 
 All tests use fixtures from `sample_data/input/`:
-- `images/` — 10 images (JPG/PNG) covering faces, text, animals, graphics
+- `images/` — 12 images (JPG/PNG) covering faces, text, animals, graphics
 - `videos/` — 1 MP4 + 20 extracted JPEG frames for tracking tests
+- Audio tests use a video file from `videos/` as the audio source
 
 ---
 
@@ -111,7 +115,8 @@ All tests use fixtures from `sample_data/input/`:
 
 ### Tests
 
-- [ ] **`track` tests require video frames**: `Sources/track/test.sh` depends on `sample_data/input/videos/selective_attention_test_frames/`. If these frames are not present the test fails. `setup.sh` only warns about missing videos, not the frames subdirectory.
+- [ ] **`track` tests skip gracefully without video frames**: `Sources/track/test.sh` skips the homographic/translational/trajectories tests if `sample_data/input/videos/selective_attention_test_frames/` is absent rather than failing hard. This is intentional but means those paths are effectively untested on most machines.
+- [ ] **`av`, `capture`, `nl`, `common` have no tests**: These subcommands were added in the audio-nl-av branch but have no `test.sh` files yet.
 - [ ] **No test isolation for binary**: All tests share the single `.build/debug/macos-vision` binary. Concurrent test runs (e.g., parallel CI jobs on the same machine) would conflict. Not currently an issue but worth noting.
 - [ ] **`jq` version sensitivity**: Tests use `jq -e` which exits non-zero on `false`/`null`. This is the intended behavior but could be surprising if JSON output fields change type in the future.
 - [ ] **No CI configuration for the new scripts**: `.github/workflows/release.yml` builds for release only and does not run `test.sh`. Consider adding a CI job that runs `./test.sh` on each PR.
