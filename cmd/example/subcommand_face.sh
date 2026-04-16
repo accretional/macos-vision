@@ -2,12 +2,31 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-BINARY="$ROOT/.build/debug/macos-vision"
-IMG="$ROOT/sample_data/input/images"
-OUTPUT="$ROOT/sample_data/output/face"
 
+ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"; export ROOT
+eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'export {k}="{root}/{v}"') for k,v in json.load(open(f)).items()]" "$ROOT" "$SCRIPT_DIR/data_files.json")"
+
+OUTPUT="$ROOT/sample_data/output/face"
 mkdir -p "$OUTPUT"
+
+# Write <stem>_<operation>.svg next to the JSON from `face --output "$OUTPUT"`.
+overlay_face() {
+    local img="$1" operation="$2"
+    local stem op json
+    stem=$(basename "$img"); stem="${stem%.*}"
+    op="${operation//-/_}"
+    json="$OUTPUT/${stem}_${op}.json"
+    if [ ! -f "$json" ]; then
+        echo "  SKIP  overlay ($json not found)"
+        return
+    fi
+    if [ ! -f "$img" ]; then
+        echo "  SKIP  overlay (source image missing)"
+        return
+    fi
+    echo "  RUN   overlay ${stem}_${op}.svg"
+    "$BINARY" overlay --json "$json" --input "$img" --output "$OUTPUT"
+}
 
 run() {
     local label="$1" img="$2"; shift 2
@@ -20,50 +39,50 @@ run() {
 }
 
 # ── face-rectangles ───────────────────────────────────────────────────────────
-run "face-rectangles" "$IMG/bohemian_rhapsody.jpg" \
-    "$BINARY" face --img "$IMG/bohemian_rhapsody.jpg" \
+run "face-rectangles" "$EXAMPLE_IMG_BOHEMIAN" \
+    "$BINARY" face --input "$EXAMPLE_IMG_BOHEMIAN" \
                    --operation face-rectangles \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT"
+overlay_face "$EXAMPLE_IMG_BOHEMIAN" face-rectangles
 
 # ── face-landmarks ────────────────────────────────────────────────────────────
-run "face-landmarks" "$IMG/fred_yass.png" \
-    "$BINARY" face --img "$IMG/fred_yass.png" \
+run "face-landmarks" "$EXAMPLE_IMG_FRED_YASS" \
+    "$BINARY" face --input "$EXAMPLE_IMG_FRED_YASS" \
                    --operation face-landmarks \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT"
+overlay_face "$EXAMPLE_IMG_FRED_YASS" face-landmarks
 
 # ── face-quality ──────────────────────────────────────────────────────────────
-run "face-quality" "$IMG/fred_yass.png" \
-    "$BINARY" face --img "$IMG/fred_yass.png" \
+run "face-quality" "$EXAMPLE_IMG_FRED_YASS" \
+    "$BINARY" face --input "$EXAMPLE_IMG_FRED_YASS" \
                    --operation face-quality \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT"
+overlay_face "$EXAMPLE_IMG_FRED_YASS" face-quality
 
 # ── human-rectangles ──────────────────────────────────────────────────────────
-run "human-rectangles" "$IMG/spiderman.jpg" \
-    "$BINARY" face --img "$IMG/spiderman.jpg" \
+run "human-rectangles" "$EXAMPLE_IMG_SPIDERMAN" \
+    "$BINARY" face --input "$EXAMPLE_IMG_SPIDERMAN" \
                    --operation human-rectangles \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT"
+overlay_face "$EXAMPLE_IMG_SPIDERMAN" human-rectangles
 
 # ── body-pose ─────────────────────────────────────────────────────────────────
-run "body-pose" "$IMG/sad_pablo.png" \
-    "$BINARY" face --img "$IMG/sad_pablo.png" \
+run "body-pose" "$EXAMPLE_IMG_SAD_PABLO" \
+    "$BINARY" face --input "$EXAMPLE_IMG_SAD_PABLO" \
                    --operation body-pose \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT"
+overlay_face "$EXAMPLE_IMG_SAD_PABLO" body-pose
 
 # ── hand-pose ─────────────────────────────────────────────────────────────────
-run "hand-pose" "$IMG/spiderman.jpg" \
-    "$BINARY" face --img "$IMG/spiderman.jpg" \
+run "hand-pose" "$EXAMPLE_IMG_SPIDERMAN" \
+    "$BINARY" face --input "$EXAMPLE_IMG_SPIDERMAN" \
                    --operation hand-pose \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT"
+overlay_face "$EXAMPLE_IMG_SPIDERMAN" hand-pose
 
-# ── animal-pose ───────────────────────────────────────────────────────────────
-run "animal-pose" "$IMG/raccoon_cotton_candy.jpg" \
-    "$BINARY" face --img "$IMG/raccoon_cotton_candy.jpg" \
+# ── animal-pose (cat_side_eye → cat_side_eye_animal_pose.json for field journal)
+run "animal-pose" "$EXAMPLE_IMG_RACCOON_COTTON_CANDY" \
+    "$BINARY" face --input "$EXAMPLE_IMG_RACCOON_COTTON_CANDY" \
                    --operation animal-pose \
-                   --output "$OUTPUT" \
-                   --svg
+                   --output "$OUTPUT"
+overlay_face "$EXAMPLE_IMG_RACCOON_COTTON_CANDY" animal-pose

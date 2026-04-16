@@ -15,7 +15,7 @@ if [ ! -f "$img" ]; then fail "sad_pablo.png not found"; echo "0 passed, 1 faile
 
 # ── foreground-mask ───────────────────────────────────────────────────────────
 echo "── segment: foreground-mask ─────────────────────────────────────────────────"
-"$BINARY" segment --img "$img" --operation foreground-mask --output "$TMP"
+"$BINARY" segment --input "$img" --operation foreground-mask --output "$TMP"
 got="$TMP/sad_pablo_foreground.png"
 if [ -f "$got" ]; then
     pass "foreground-mask: output produced"
@@ -38,8 +38,8 @@ echo
 # ── error handling ────────────────────────────────────────────────────────────
 echo "── segment: error handling ──────────────────────────────────────────────────"
 err=$("$BINARY" segment 2>&1 || true)
-echo "$err" | grep -qi "img\|must be provided\|error" && pass "segment: missing input error shown" || fail "segment: no error on missing input"
-err=$("$BINARY" segment --img "$img" --operation bad-op 2>&1 || true)
+echo "$err" | grep -qiE "img|input|must be provided|provide|error" && pass "segment: missing input error shown" || fail "segment: no error on missing input"
+err=$("$BINARY" segment --input "$img" --operation bad-op 2>&1 || true)
 echo "$err" | grep -qi "unknown\|supported\|error" && pass "segment: unknown operation rejected" || fail "segment: unknown operation not rejected"
 echo
 

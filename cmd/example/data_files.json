@@ -1,0 +1,33 @@
+{
+  "BINARY": ".build/debug/macos-vision",
+
+  "EXAMPLE_IMG_DIR": "sample_data/input/images",
+  "EXAMPLE_TEXT_DIR": "sample_data/input/text",
+  "EXAMPLE_AUDIO_DIR": "sample_data/input/audios",
+  "EXAMPLE_VIDEO_DIR": "sample_data/input/videos",
+  
+  "EXAMPLE_TRACK_FRAMES": "sample_data/input/videos/selective_attention_test_frames",
+  "EXAMPLE_TRACK_VIDEO": "sample_data/input/videos/selective_attention_test.mp4",
+  "EXAMPLE_IMG_HANDWRITING": "sample_data/input/images/handwriting.png",
+  "EXAMPLE_IMG_TEXT_PRINTED": "sample_data/input/images/text_printed.jpg",
+  "EXAMPLE_IMG_BOHEMIAN": "sample_data/input/images/bohemian_rhapsody.jpg",
+  "EXAMPLE_IMG_FRED_YASS": "sample_data/input/images/fred_yass.png",
+  "EXAMPLE_IMG_SPIDERMAN": "sample_data/input/images/spiderman.jpg",
+  "EXAMPLE_IMG_SAD_PABLO": "sample_data/input/images/sad_pablo.png",
+  "EXAMPLE_IMG_CAT_SIDE_EYE": "sample_data/input/images/cat_side_eye.jpg",
+  "EXAMPLE_IMG_GORILLA": "sample_data/input/images/gorilla.jpg",
+  "EXAMPLE_IMG_DOCUMENT": "sample_data/input/images/document.jpg",
+  "EXAMPLE_IMG_RACCOON_COTTON_CANDY": "sample_data/input/images/raccoon_cotton_candy.jpg",
+
+  "EXAMPLE_VIDEO_KAZOO": "sample_data/input/videos/kazoo_kid_who_are_you.mp4",
+
+  "EXAMPLE_AUDIO_SPEECH": "sample_data/input/audios/kazoo_kid_who_are_you.wav",
+  "EXAMPLE_AUDIO_MUSIC": "sample_data/input/audios/badly_sung_sorry.mp3",
+  "EXAMPLE_AUDIO_SOUNDS": "sample_data/input/audios/sounds.wav",
+
+  "EXAMPLE_TEXT_CESTLAVIE": "sample_data/input/text/cestlavie.txt",
+  "EXAMPLE_TEXT_JOKER": "sample_data/input/text/joker.txt",
+  "EXAMPLE_TEXT_MORDOR": "sample_data/input/text/mordor.txt",
+  "EXAMPLE_TEXT_SEASHELLS": "sample_data/input/text/seashells.txt",
+  "EXAMPLE_TEXT_INDECISIVE": "sample_data/input/text/indecisive.txt"
+}

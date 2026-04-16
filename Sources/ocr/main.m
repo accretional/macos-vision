@@ -1,4 +1,5 @@
 #import "main.h"
+#import "common/MVJsonEmit.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 
@@ -20,25 +21,34 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
 - (BOOL)runWithError:(NSError **)error {
     if (self.lang) {
         NSArray<NSString *> *languages = [self supportedLanguages];
-        printf("Supported recognition languages:\n");
+        fprintf(stderr, "Supported recognition languages:\n");
         for (NSString *l in languages) {
-            printf("- %s\n", l.UTF8String);
+            fprintf(stderr, "- %s\n", l.UTF8String);
         }
         return YES;
     }
 
-    if (self.img) {
-        return [self processSingleImage:self.img outputDir:self.output error:error];
-    } else if (self.imgDir) {
-        return [self processBatchImages:self.imgDir outputDir:self.outputDir error:error];
-    } else {
+    if (!self.inputPath.length) {
         if (error) {
             *error = [NSError errorWithDomain:OCRErrorDomain
                                          code:OCRErrorMissingInput
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Either --img or --img-dir must be provided"}];
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image.png>"}];
         }
         return NO;
     }
+
+    NSDictionary *inner = [self recognitionResultFromImage:self.inputPath error:error];
+    if (!inner) return NO;
+
+    NSMutableArray *artifactEntries = [NSMutableArray array];
+    if (self.debug) {
+        NSString *dbgPath = [self drawDebugImage:self.inputPath observations:inner[@"observations"] error:error];
+        if (!dbgPath) return NO;
+        [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
+    }
+    NSDictionary *merged = MVResultByMergingArtifacts(inner, artifactEntries);
+    NSDictionary *envelope = MVMakeEnvelope(@"ocr", @"recognize", self.inputPath, merged);
+    return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
 // ── language support ──────────────────────────────────────────────────────────
@@ -55,99 +65,9 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
     return @[@"zh-Hans", @"zh-Hant", @"en-US", @"ja-JP"];
 }
 
-// ── single image ──────────────────────────────────────────────────────────────
-
-- (BOOL)processSingleImage:(NSString *)imagePath outputDir:(nullable NSString *)outputDir error:(NSError **)error {
-    NSString *jsonResult = [self extractTextFromImage:imagePath error:error];
-    if (!jsonResult) return NO;
-
-    if (outputDir) {
-        NSFileManager *fm = [NSFileManager defaultManager];
-        if (![fm fileExistsAtPath:outputDir]) {
-            if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) {
-                return NO;
-            }
-        }
-        NSString *inputFileName = [imagePath lastPathComponent];
-        NSString *outputFileName = [[inputFileName stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
-        NSString *outputPath = [outputDir stringByAppendingPathComponent:outputFileName];
-        if (![jsonResult writeToFile:outputPath atomically:YES encoding:NSUTF8StringEncoding error:error]) {
-            return NO;
-        }
-        printf("OCR result saved to: %s\n", outputPath.UTF8String);
-    } else {
-        printf("%s\n", jsonResult.UTF8String);
-    }
-
-    if (self.debug) {
-        return [self drawDebugImage:imagePath jsonResult:jsonResult error:error];
-    }
-    return YES;
-}
-
-// ── batch mode ────────────────────────────────────────────────────────────────
-
-- (BOOL)processBatchImages:(NSString *)imgDir outputDir:(nullable NSString *)outputDir error:(NSError **)error {
-    NSFileManager *fm = [NSFileManager defaultManager];
-
-    if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-        if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) {
-            return NO;
-        }
-    }
-
-    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:imgDir];
-    NSMutableArray<NSString *> *imageFiles = [NSMutableArray array];
-    NSString *filePath;
-    while ((filePath = [enumerator nextObject])) {
-        if ([self isImageFile:filePath]) {
-            [imageFiles addObject:filePath];
-        }
-    }
-    [imageFiles sortUsingSelector:@selector(compare:)];
-
-    NSMutableString *mergedText = [NSMutableString string];
-
-    for (NSString *imagePath in imageFiles) {
-        NSString *fullImagePath = [imgDir stringByAppendingPathComponent:imagePath];
-        NSString *jsonResult = [self extractTextFromImage:fullImagePath error:error];
-        if (!jsonResult) return NO;
-
-        if (outputDir) {
-            NSString *outputFileName = [[imagePath lastPathComponent] stringByAppendingString:@".json"];
-            NSString *outputPath = [outputDir stringByAppendingPathComponent:outputFileName];
-            if (![jsonResult writeToFile:outputPath atomically:YES encoding:NSUTF8StringEncoding error:error]) {
-                return NO;
-            }
-        }
-
-        if (self.merge) {
-            NSData *data = [jsonResult dataUsingEncoding:NSUTF8StringEncoding];
-            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-            NSString *texts = json[@"texts"];
-            if (texts) {
-                [mergedText appendString:texts];
-                [mergedText appendString:@"\n\n"];
-            }
-        }
-
-        if (self.debug) {
-            if (![self drawDebugImage:fullImagePath jsonResult:jsonResult error:error]) return NO;
-        }
-    }
-
-    if (self.merge && outputDir) {
-        NSString *mergedPath = [outputDir stringByAppendingPathComponent:@"merged_output.txt"];
-        if (![mergedText writeToFile:mergedPath atomically:YES encoding:NSUTF8StringEncoding error:error]) {
-            return NO;
-        }
-    }
-    return YES;
-}
-
 // ── OCR core ──────────────────────────────────────────────────────────────────
 
-- (nullable NSString *)extractTextFromImage:(NSString *)imagePath error:(NSError **)error {
+- (nullable NSDictionary *)recognitionResultFromImage:(NSString *)imagePath error:(NSError **)error {
     NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
     if (!image) {
         if (error) {
@@ -229,12 +149,9 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
         }];
     }
 
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *absolutePath = [fm.currentDirectoryPath stringByAppendingPathComponent:imagePath];
-
     NSDictionary *info = @{
         @"filename": [imagePath lastPathComponent],
-        @"filepath": absolutePath,
+        @"filepath": MVRelativePath(imagePath),
         @"width":    @(CGImageGetWidth(cgImage)),
         @"height":   @(CGImageGetHeight(cgImage)),
     };
@@ -245,12 +162,7 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
         @"observations": positionalJson,
         @"texts":        [fullText componentsJoinedByString:@"\n"],
     };
-
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result
-                                                       options:NSJSONWritingPrettyPrinted
-                                                         error:error];
-    if (!jsonData) return nil;
-    return [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    return result;
 }
 
 // ── format helpers ────────────────────────────────────────────────────────────
@@ -285,7 +197,8 @@ static NSString *extensionForFormat(NSString *fmt) {
 
 // ── debug image ───────────────────────────────────────────────────────────────
 
-- (BOOL)drawDebugImage:(NSString *)imagePath jsonResult:(NSString *)jsonResult error:(NSError **)error {
+/// Returns the written image path, or nil on failure.
+- (nullable NSString *)drawDebugImage:(NSString *)imagePath observations:(NSArray *)observations error:(NSError **)error {
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:imagePath];
     if (!image) {
         if (error) {
@@ -294,7 +207,7 @@ static NSString *extensionForFormat(NSString *fmt) {
                                      userInfo:@{NSLocalizedDescriptionKey:
                                                     [NSString stringWithFormat:@"Failed to load image: %@", imagePath]}];
         }
-        return NO;
+        return nil;
     }
 
     NSSize size = image.size;
@@ -302,18 +215,14 @@ static NSString *extensionForFormat(NSString *fmt) {
     [newImage lockFocus];
     [image drawInRect:NSMakeRect(0, 0, size.width, size.height)];
 
-    NSData *data = [jsonResult dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
-    if (!json) { [newImage unlockFocus]; return NO; }
-    NSArray<NSDictionary *> *observations = json[@"observations"];
     if (!observations) {
         [newImage unlockFocus];
         if (error) {
             *error = [NSError errorWithDomain:OCRErrorDomain
                                          code:OCRErrorJSONParsingFailed
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Failed to parse observations from JSON"}];
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Missing observations for debug overlay"}];
         }
-        return NO;
+        return nil;
     }
 
     [[NSColor redColor] setStroke];
@@ -350,9 +259,15 @@ static NSString *extensionForFormat(NSString *fmt) {
         ? @{NSImageCompressionFactor: @(0.85)}
         : @{};
 
-    NSString *outputFileName = [[[imagePath stringByDeletingPathExtension]
-                                 stringByAppendingString:@"_boxes"]
-                                stringByAppendingPathExtension:ext];
+    NSString *baseName = [[[imagePath lastPathComponent] stringByDeletingPathExtension]
+                          stringByAppendingString:@"_boxes"];
+    NSString *outputFileName = [baseName stringByAppendingPathExtension:ext];
+    NSString *dir = self.artifactsDir.length ? self.artifactsDir : [imagePath stringByDeletingLastPathComponent];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (self.artifactsDir.length && ![fm fileExistsAtPath:self.artifactsDir]) {
+        if (![fm createDirectoryAtPath:self.artifactsDir withIntermediateDirectories:YES attributes:nil error:error]) return nil;
+    }
+    NSString *fullOut = [dir stringByAppendingPathComponent:outputFileName];
     NSData *tiff = [newImage TIFFRepresentation];
     NSBitmapImageRep *bitmap = [NSBitmapImageRep imageRepWithData:tiff];
     NSData *imgData = [bitmap representationUsingType:bitmapType properties:props];
@@ -361,20 +276,13 @@ static NSString *extensionForFormat(NSString *fmt) {
             *error = [NSError errorWithDomain:OCRErrorDomain
                                          code:OCRErrorImageConversionFailed
                                      userInfo:@{NSLocalizedDescriptionKey:
-                                                    [NSString stringWithFormat:@"Failed to encode %@: %@", ext, outputFileName]}];
+                                                    [NSString stringWithFormat:@"Failed to encode %@: %@", ext, fullOut]}];
         }
-        return NO;
+        return nil;
     }
-    if (![imgData writeToFile:outputFileName options:NSDataWritingAtomic error:error]) return NO;
-    printf("Debug image saved to: %s\n", outputFileName.UTF8String);
-    return YES;
-}
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-- (BOOL)isImageFile:(NSString *)filePath {
-    NSArray<NSString *> *extensions = @[@"jpg", @"jpeg", @"png", @"webp"];
-    return [extensions containsObject:[filePath.pathExtension lowercaseString]];
+    if (![imgData writeToFile:fullOut options:NSDataWritingAtomic error:error]) return nil;
+    fprintf(stderr, "Debug image saved to: %s\n", fullOut.UTF8String);
+    return fullOut;
 }
 
 @end

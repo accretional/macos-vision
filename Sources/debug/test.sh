@@ -15,18 +15,18 @@ if [ ! -f "$img" ]; then fail "handwriting.png not found"; echo "0 passed, 1 fai
 
 # ── single image ──────────────────────────────────────────────────────────────
 echo "── debug: single image ──────────────────────────────────────────────────────"
-"$BINARY" debug --img "$img" --output "$TMP"
+"$BINARY" debug --input "$img" --output "$TMP"
 got="$TMP/handwriting.json"
 if [ -f "$got" ]; then
     pass "debug: output produced"
     jq empty "$got" 2>/dev/null && pass "debug: valid JSON" || fail "debug: invalid JSON"
     for field in filename filepath width height filesize; do
-        val=$(jq -r ".$field // empty" "$got")
+        val=$(jq -r ".result.$field // empty" "$got")
         [ -n "$val" ] && pass "debug: $field present ($val)" || fail "debug: $field missing"
     done
-    w=$(jq '.width'  "$got"); [ "$w" = "1600" ] && pass "debug: width=1600"  || fail "debug: width (got $w)"
-    h=$(jq '.height' "$got"); [ "$h" = "720"  ] && pass "debug: height=720"  || fail "debug: height (got $h)"
-    fn=$(jq -r '.filename' "$got"); [ "$fn" = "handwriting.png" ] && pass "debug: filename correct" || fail "debug: filename (got $fn)"
+    w=$(jq '.result.width'  "$got"); [ "$w" = "1600" ] && pass "debug: width=1600"  || fail "debug: width (got $w)"
+    h=$(jq '.result.height' "$got"); [ "$h" = "720"  ] && pass "debug: height=720"  || fail "debug: height (got $h)"
+    fn=$(jq -r '.result.filename' "$got"); [ "$fn" = "handwriting.png" ] && pass "debug: filename correct" || fail "debug: filename (got $fn)"
 else
     fail "debug: output not produced"
 fi
@@ -35,7 +35,7 @@ echo
 # ── error handling ────────────────────────────────────────────────────────────
 echo "── debug: error handling ────────────────────────────────────────────────────"
 err=$("$BINARY" debug 2>&1 || true)
-echo "$err" | grep -qi "img\|must be provided\|error" && pass "debug: missing input error shown" || fail "debug: no error on missing input"
+echo "$err" | grep -qi "img\|input\|must be provided\|provide\|error" && pass "debug: missing input error shown" || fail "debug: no error on missing input"
 echo
 
 echo "Results: $PASS passed, $FAIL failed"

@@ -15,15 +15,15 @@ if [ ! -f "$img" ]; then fail "handwriting.png not found"; echo "0 passed, 1 fai
 
 # ── single image ──────────────────────────────────────────────────────────────
 echo "── ocr: single image ────────────────────────────────────────────────────────"
-"$BINARY" ocr --img "$img" --output "$TMP"
+"$BINARY" ocr --input "$img" --output "$TMP"
 got="$TMP/handwriting.json"
 if [ -f "$got" ]; then
     pass "ocr: output produced"
     jq empty "$got" 2>/dev/null && pass "ocr: valid JSON" || fail "ocr: invalid JSON"
-    jq -e '.observations' "$got" >/dev/null 2>&1 && pass "ocr: observations field present" || fail "ocr: observations field missing"
-    count=$(jq '.observations | length' "$got" 2>/dev/null || echo 0)
+    jq -e '.result.observations' "$got" >/dev/null 2>&1 && pass "ocr: observations field present" || fail "ocr: observations field missing"
+    count=$(jq '.result.observations | length' "$got" 2>/dev/null || echo 0)
     [ "${count:-0}" -gt 0 ] && pass "ocr: $count observation(s) returned" || fail "ocr: no observations returned"
-    jq -e '.texts' "$got" >/dev/null 2>&1 && pass "ocr: texts field present" || fail "ocr: texts field missing"
+    jq -e '.result.texts' "$got" >/dev/null 2>&1 && pass "ocr: texts field present" || fail "ocr: texts field missing"
     jq -e '.operation' "$got" >/dev/null 2>&1 && pass "ocr: operation field present" || fail "ocr: operation field missing"
 else
     fail "ocr: output not produced"
@@ -41,7 +41,7 @@ echo
 # ── error handling ────────────────────────────────────────────────────────────
 echo "── ocr: error handling ──────────────────────────────────────────────────────"
 err=$("$BINARY" ocr 2>&1 || true)
-echo "$err" | grep -qi "img\|must be provided\|error" && pass "ocr: missing input error shown" || fail "ocr: no error on missing input"
+echo "$err" | grep -qi "img\|input\|must be provided\|provide\|error" && pass "ocr: missing input error shown" || fail "ocr: no error on missing input"
 echo
 
 echo "Results: $PASS passed, $FAIL failed"

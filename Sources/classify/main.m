@@ -1,5 +1,5 @@
 #import "main.h"
-#import "../svg/main.h"
+#import "common/MVJsonEmit.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 
@@ -59,44 +59,33 @@ static NSString *extensionForFormat(NSString *fmt) {
 @implementation ClassifyProcessor
 
 - (instancetype)init {
-    if ((self = [super init])) {
-        _svgLabels = NO;
-    }
-    return self;
+    return [super init];
 }
 
 // ── public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
     NSString *op = self.operation.length ? self.operation : @"classify";
-    if (self.img) {
-        return [self processImage:self.img outputDir:self.output operation:op error:error];
-    } else if (self.imgDir) {
-        return [self processBatch:self.imgDir outputDir:self.outputDir operation:op error:error];
+    if (!self.inputPath.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorMissingInput
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
+        }
+        return NO;
     }
-    if (error) {
-        *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorMissingInput
-                                userInfo:@{NSLocalizedDescriptionKey: @"Either --img or --img-dir must be provided"}];
-    }
-    return NO;
+    return [self processImage:self.inputPath operation:op error:error];
 }
 
-// ── single image ──────────────────────────────────────────────────────────────
-
-- (BOOL)processImage:(NSString *)imagePath outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-        if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
-    }
+- (BOOL)processImage:(NSString *)imagePath operation:(NSString *)op error:(NSError **)error {
     NSString *base = [[imagePath lastPathComponent] stringByDeletingPathExtension];
 
-    if ([op isEqualToString:@"classify"])      return [self runClassify:imagePath base:base outputDir:outputDir error:error];
-    if ([op isEqualToString:@"animals"])       return [self runAnimals:imagePath base:base outputDir:outputDir error:error];
-    if ([op isEqualToString:@"rectangles"])    return [self runRectangles:imagePath base:base outputDir:outputDir error:error];
-    if ([op isEqualToString:@"horizon"])       return [self runHorizon:imagePath base:base outputDir:outputDir error:error];
-    if ([op isEqualToString:@"contours"])      return [self runContours:imagePath base:base outputDir:outputDir error:error];
-    if ([op isEqualToString:@"aesthetics"])    return [self runAesthetics:imagePath base:base outputDir:outputDir error:error];
-    if ([op isEqualToString:@"feature-print"]) return [self runFeaturePrint:imagePath base:base outputDir:outputDir error:error];
+    if ([op isEqualToString:@"classify"])      return [self runClassify:imagePath base:base error:error];
+    if ([op isEqualToString:@"animals"])       return [self runAnimals:imagePath base:base error:error];
+    if ([op isEqualToString:@"rectangles"])    return [self runRectangles:imagePath base:base error:error];
+    if ([op isEqualToString:@"horizon"])       return [self runHorizon:imagePath base:base error:error];
+    if ([op isEqualToString:@"contours"])      return [self runContours:imagePath base:base error:error];
+    if ([op isEqualToString:@"aesthetics"])    return [self runAesthetics:imagePath base:base error:error];
+    if ([op isEqualToString:@"feature-print"]) return [self runFeaturePrint:imagePath base:base error:error];
 
     if (error) {
         *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorMissingInput
@@ -106,31 +95,9 @@ static NSString *extensionForFormat(NSString *fmt) {
     return NO;
 }
 
-// ── batch mode ────────────────────────────────────────────────────────────────
-
-- (BOOL)processBatch:(NSString *)imgDir outputDir:(nullable NSString *)outputDir operation:(NSString *)op error:(NSError **)error {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (outputDir && ![fm fileExistsAtPath:outputDir]) {
-        if (![fm createDirectoryAtPath:outputDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
-    }
-    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:imgDir];
-    NSMutableArray<NSString *> *imageFiles = [NSMutableArray array];
-    NSString *filePath;
-    while ((filePath = [enumerator nextObject])) {
-        if ([self isImageFile:filePath]) [imageFiles addObject:filePath];
-    }
-    [imageFiles sortUsingSelector:@selector(compare:)];
-
-    for (NSString *relativePath in imageFiles) {
-        NSString *fullPath = [imgDir stringByAppendingPathComponent:relativePath];
-        if (![self processImage:fullPath outputDir:outputDir operation:op error:error]) return NO;
-    }
-    return YES;
-}
-
 // ── classify (VNClassifyImageRequest) ─────────────────────────────────────────
 
-- (BOOL)runClassify:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runClassify:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -158,12 +125,12 @@ static NSString *extensionForFormat(NSString *fmt) {
         @"operation":       @"classify",
         @"classifications": classifications,
     };
-    return [self saveJSON:json base:base suffix:@"classify" outputDir:outputDir error:error];
+    return [self saveJSON:json artifactEntries:nil error:error];
 }
 
 // ── animals (VNRecognizeAnimalsRequest) ───────────────────────────────────────
 
-- (BOOL)runAnimals:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runAnimals:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -196,17 +163,18 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
 
     NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"animals", @"animals": animals};
-    if (![self saveJSON:json base:base suffix:@"animals" outputDir:outputDir error:error]) return NO;
+    NSMutableArray *artifactEntries = [NSMutableArray array];
     if (self.debug && debugBoxes.count > 0) {
-        NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"animals"];
-        [self drawDebug:imagePath boxes:debugBoxes toPath:dbgPath error:nil];
+        NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"animals"];
+        if ([self drawDebug:imagePath boxes:debugBoxes toPath:dbgPath error:nil])
+            [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
     }
-    return YES;
+    return [self saveJSON:json artifactEntries:artifactEntries error:error];
 }
 
 // ── rectangles (VNDetectRectanglesRequest) ────────────────────────────────────
 
-- (BOOL)runRectangles:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runRectangles:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -242,17 +210,18 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
 
     NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"rectangles", @"rectangles": rects};
-    if (![self saveJSON:json base:base suffix:@"rectangles" outputDir:outputDir error:error]) return NO;
+    NSMutableArray *artifactEntries = [NSMutableArray array];
     if (self.debug && debugBoxes.count > 0) {
-        NSString *dbgPath = [self debugPath:imagePath base:base suffix:@"rectangles"];
-        [self drawDebug:imagePath boxes:debugBoxes toPath:dbgPath error:nil];
+        NSString *dbgPath = [self debugOutputPath:imagePath base:base suffix:@"rectangles"];
+        if ([self drawDebug:imagePath boxes:debugBoxes toPath:dbgPath error:nil])
+            [artifactEntries addObject:MVArtifactEntry(dbgPath, @"debug_overlay")];
     }
-    return YES;
+    return [self saveJSON:json artifactEntries:artifactEntries error:error];
 }
 
 // ── horizon (VNDetectHorizonRequest) ──────────────────────────────────────────
 
-- (BOOL)runHorizon:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runHorizon:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -279,12 +248,12 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
 
     NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"horizon", @"horizon": horizon};
-    return [self saveJSON:json base:base suffix:@"horizon" outputDir:outputDir error:error];
+    return [self saveJSON:json artifactEntries:nil error:error];
 }
 
 // ── contours (VNDetectContoursRequest, macOS 11+) ─────────────────────────────
 
-- (BOOL)runContours:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runContours:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     if (@available(macOS 11.0, *)) {
         CGImageRef cg = [self loadCGImage:imagePath error:error];
         if (!cg) return NO;
@@ -318,7 +287,7 @@ static NSString *extensionForFormat(NSString *fmt) {
             @"contourCount":  @(result ? result.contourCount : 0),
             @"topContours":   topContours,
         };
-        return [self saveJSON:json base:base suffix:@"contours" outputDir:outputDir error:error];
+        return [self saveJSON:json artifactEntries:nil error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"contours requires macOS 11.0+"}];
@@ -328,7 +297,7 @@ static NSString *extensionForFormat(NSString *fmt) {
 
 // ── aesthetics (VNCalculateImageAestheticsScoresRequest, macOS 15+) ───────────
 
-- (BOOL)runAesthetics:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runAesthetics:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     if (@available(macOS 15.0, *)) {
         CGImageRef cg = [self loadCGImage:imagePath error:error];
         if (!cg) return NO;
@@ -350,7 +319,7 @@ static NSString *extensionForFormat(NSString *fmt) {
         }
 
         NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"aesthetics", @"scores": scores};
-        return [self saveJSON:json base:base suffix:@"aesthetics" outputDir:outputDir error:error];
+        return [self saveJSON:json artifactEntries:nil error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"aesthetics requires macOS 15.0+"}];
@@ -360,7 +329,7 @@ static NSString *extensionForFormat(NSString *fmt) {
 
 // ── feature-print (VNGenerateImageFeaturePrintRequest) ────────────────────────
 
-- (BOOL)runFeaturePrint:(NSString *)imagePath base:(NSString *)base outputDir:(nullable NSString *)outputDir error:(NSError **)error {
+- (BOOL)runFeaturePrint:(NSString *)imagePath base:(NSString *)base error:(NSError **)error {
     CGImageRef cg = [self loadCGImage:imagePath error:error];
     if (!cg) return NO;
 
@@ -383,7 +352,7 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
 
     NSDictionary *json = @{@"info": [self imageInfo:imagePath], @"operation": @"feature-print", @"featurePrint": featurePrint};
-    return [self saveJSON:json base:base suffix:@"feature_print" outputDir:outputDir error:error];
+    return [self saveJSON:json artifactEntries:nil error:error];
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -408,44 +377,21 @@ static NSString *extensionForFormat(NSString *fmt) {
 }
 
 - (NSDictionary *)imageInfo:(NSString *)imagePath {
-    NSString *abs = [imagePath hasPrefix:@"/"]
-        ? imagePath
-        : [[NSFileManager defaultManager].currentDirectoryPath stringByAppendingPathComponent:imagePath];
     NSImage *img = [[NSImage alloc] initByReferencingFile:imagePath];
     CGImageRef cg = img ? [img CGImageForProposedRect:nil context:nil hints:nil] : NULL;
     return @{
         @"filename": [imagePath lastPathComponent],
-        @"filepath": abs,
+        @"filepath": MVRelativePath(imagePath),
         @"width":    @(cg ? CGImageGetWidth(cg)  : 0),
         @"height":   @(cg ? CGImageGetHeight(cg) : 0),
     };
 }
 
-- (BOOL)saveJSON:(NSDictionary *)json
-            base:(NSString *)base
-          suffix:(NSString *)suffix
-       outputDir:(nullable NSString *)outputDir
-           error:(NSError **)error {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:json options:NSJSONWritingPrettyPrinted error:error];
-    if (!data) return NO;
-    NSString *str = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-
-    if (outputDir) {
-        NSString *filename = [NSString stringWithFormat:@"%@_%@.json", base, suffix];
-        NSString *path = [outputDir stringByAppendingPathComponent:filename];
-        if (![str writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:error]) return NO;
-        printf("Saved: %s\n", path.UTF8String);
-        if (self.svg) {
-            SVGProcessor *svgProc = [[SVGProcessor alloc] init];
-            svgProc.jsonPath   = path;
-            svgProc.output     = outputDir;
-            svgProc.showLabels = self.svgLabels;
-            [svgProc runWithError:nil];
-        }
-    } else {
-        printf("%s\n", str.UTF8String);
-    }
-    return YES;
+- (BOOL)saveJSON:(NSDictionary *)json artifactEntries:(NSArray<NSDictionary *> *)artifactEntries error:(NSError **)error {
+    NSString *op = json[@"operation"] ?: @"classify";
+    NSDictionary *merged = MVResultByMergingArtifacts(json, artifactEntries ?: @[]);
+    NSDictionary *envelope = MVMakeEnvelope(@"classify", op, self.inputPath, merged);
+    return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
 - (BOOL)drawDebug:(NSString *)imagePath
@@ -454,6 +400,14 @@ static NSString *extensionForFormat(NSString *fmt) {
             error:(NSError **)error {
     NSImage *image = [[NSImage alloc] initWithContentsOfFile:imagePath];
     if (!image) return NO;
+
+    NSString *parent = outputPath.stringByDeletingLastPathComponent;
+    if (parent.length) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:parent
+                                    withIntermediateDirectories:YES
+                                                     attributes:nil
+                                                          error:nil];
+    }
 
     NSSize size = image.size;
     NSImage *out = [[NSImage alloc] initWithSize:size];
@@ -487,20 +441,15 @@ static NSString *extensionForFormat(NSString *fmt) {
     }
     NSString *finalPath = [[outputPath stringByDeletingPathExtension] stringByAppendingPathExtension:ext];
     if (![imgData writeToFile:finalPath options:NSDataWritingAtomic error:error]) return NO;
-    printf("Debug image saved to: %s\n", finalPath.UTF8String);
+    fprintf(stderr, "Debug image saved to: %s\n", finalPath.UTF8String);
     return YES;
 }
 
-- (NSString *)debugPath:(NSString *)imagePath base:(NSString *)base suffix:(NSString *)suffix {
-    NSString *dir = [imagePath stringByDeletingLastPathComponent];
+- (NSString *)debugOutputPath:(NSString *)imagePath base:(NSString *)base suffix:(NSString *)suffix {
+    NSString *dir = self.artifactsDir.length ? self.artifactsDir : [imagePath stringByDeletingLastPathComponent];
     NSString *fmt = self.boxesFormat.length ? self.boxesFormat : @"png";
     NSString *filename = [NSString stringWithFormat:@"%@_%@_boxes.%@", base, suffix, extensionForFormat(fmt)];
     return [dir stringByAppendingPathComponent:filename];
-}
-
-- (BOOL)isImageFile:(NSString *)filePath {
-    NSArray<NSString *> *extensions = @[@"jpg", @"jpeg", @"png", @"webp"];
-    return [extensions containsObject:[filePath.pathExtension lowercaseString]];
 }
 
 @end

@@ -5,61 +5,150 @@
 #import "face/main.h"
 #import "classify/main.h"
 #import "track/main.h"
-#import "svg/main.h"
+#import "overlay/main.h"  // OverlayProcessor
+#import "audio/main.h"
+#import "capture/main.h"
+#import "nl/main.h"
+#import "av/main.h"
+
+static BOOL MVPathLooksLikeStillImage(NSString *path) {
+    if (!path.length) return NO;
+    NSString *e = path.pathExtension.lowercaseString;
+    static NSSet<NSString *> *exts;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        exts = [NSSet setWithArray:@[@"jpg", @"jpeg", @"png", @"heic", @"heif", @"gif", @"tif", @"tiff", @"bmp", @"webp"]];
+    });
+    return [exts containsObject:e];
+}
+
+static BOOL MVPathIsExistingDirectory(NSString *path) {
+    if (!path.length) return NO;
+    BOOL isDir = NO;
+    return [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDir] && isDir;
+}
+
+static NSString *MVMainStem(NSString *path) {
+    NSString *s = path.lastPathComponent.stringByDeletingPathExtension;
+    return s.length ? s : @"result";
+}
+
+static NSString *MVMainEffectiveOperation(NSString *subcommand, NSString *operation) {
+    if (operation.length) return operation;
+    if ([subcommand isEqualToString:@"segment"]) return @"foreground-mask";
+    if ([subcommand isEqualToString:@"face"]) return @"face-rectangles";
+    if ([subcommand isEqualToString:@"classify"]) return @"classify";
+    if ([subcommand isEqualToString:@"track"]) return @"homographic";
+    if ([subcommand isEqualToString:@"audio"]) return @"classify";
+    if ([subcommand isEqualToString:@"capture"]) return @"screenshot";
+    if ([subcommand isEqualToString:@"av"]) return @"inspect";
+    if ([subcommand isEqualToString:@"nl"]) return @"detect-language";
+    return @"default";
+}
+
+static NSString *MVMainJsonInDirectory(NSString *dir, NSString *subcommand, NSString *operation, NSString *stemPath) {
+    NSString *op = [operation stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+    if ([subcommand isEqualToString:@"track"]) {
+        // Stable names for gallery / field journal: track_<op>.json (optical-flow under optical-flow/)
+        NSString *base = [NSString stringWithFormat:@"track_%@", op];
+        if ([op isEqualToString:@"optical_flow"]) {
+            NSString *sub = [dir stringByAppendingPathComponent:@"optical-flow"];
+            return [sub stringByAppendingPathComponent:[base stringByAppendingPathExtension:@"json"]];
+        }
+        return [dir stringByAppendingPathComponent:[base stringByAppendingPathExtension:@"json"]];
+    }
+    if ([subcommand isEqualToString:@"overlay"]) {
+        NSString *stem = MVMainStem(stemPath);
+        if (!stem.length) stem = @"overlay";
+        return [dir stringByAppendingPathComponent:[[stem stringByAppendingString:@"_overlay"] stringByAppendingPathExtension:@"json"]];
+    }
+    if ([subcommand isEqualToString:@"ocr"] || [subcommand isEqualToString:@"debug"] ||
+        [subcommand isEqualToString:@"audio"] || [subcommand isEqualToString:@"nl"]) {
+        return [dir stringByAppendingPathComponent:[MVMainStem(stemPath) stringByAppendingPathExtension:@"json"]];
+    }
+    NSString *stem = MVMainStem(stemPath);
+    return [dir stringByAppendingPathComponent:[[NSString stringWithFormat:@"%@_%@", stem, op]
+                                                   stringByAppendingPathExtension:@"json"]];
+}
+
+static NSString *MVMainResolvedJSONOutput(NSString *subcommand,
+                                          NSString *operation,
+                                          NSString *jsonOutOpt,
+                                          NSString *outOpt,
+                                          NSString *stemPath) {
+    if (jsonOutOpt.length && !MVPathIsExistingDirectory(jsonOutOpt)) {
+        return jsonOutOpt;
+    }
+    if (jsonOutOpt.length && MVPathIsExistingDirectory(jsonOutOpt)) {
+        return MVMainJsonInDirectory(jsonOutOpt, subcommand, operation, stemPath);
+    }
+    if (!outOpt.length) return nil;
+    if (MVPathIsExistingDirectory(outOpt)) {
+        return MVMainJsonInDirectory(outOpt, subcommand, operation, stemPath);
+    }
+    if ([outOpt.pathExtension.lowercaseString isEqualToString:@"json"]) {
+        return outOpt;
+    }
+    return nil;
+}
+
+static NSString *MVMainResolvedArtifactsDir(NSString *subcommand,
+                                            NSString *operation,
+                                            NSString *artifactsDirOpt,
+                                            NSString *outOpt) {
+    if (artifactsDirOpt.length) return artifactsDirOpt;
+    if (!MVPathIsExistingDirectory(outOpt)) return nil;
+    if ([subcommand isEqualToString:@"segment"]) return outOpt;
+    if ([subcommand isEqualToString:@"track"]) {
+        NSString *op = MVMainEffectiveOperation(subcommand, operation).lowercaseString;
+        if ([op isEqualToString:@"optical-flow"]) return outOpt;
+        return nil;
+    }
+    if ([subcommand isEqualToString:@"face"] || [subcommand isEqualToString:@"classify"] ||
+        [subcommand isEqualToString:@"ocr"]) {
+        return outOpt;
+    }
+    if ([subcommand isEqualToString:@"capture"]) {
+        NSString *cap = MVMainEffectiveOperation(subcommand, operation).lowercaseString;
+        if (![cap isEqualToString:@"list-devices"]) return outOpt;
+    }
+    return nil;
+}
 
 static void printUsage(void) {
     printf(
         "USAGE: macos-vision <subcommand> [options]\n"
         "\n"
         "SUBCOMMANDS:\n"
-        "  ocr       Perform OCR on single image or batch of images\n"
-        "  face      Face, body, and pose analysis\n"
-        "  classify  Scene/object classification and image analysis\n"
-        "  segment   Image segmentation and saliency analysis\n"
-        "  track     Video tracking and image registration\n"
-        "  svg       Overlay Vision JSON output as SVG shapes on the source image\n"
-        "  debug     Print image metadata (dimensions, file size)\n"
+        "  ocr       Text recognition (Vision)\n"
+        "  face      Face, body, and pose (Vision)\n"
+        "  classify  Scene/object analysis (Vision)\n"
+        "  segment   Masks and saliency (Vision)\n"
+        "  track     Video or frame-sequence registration / motion (Vision)\n"
+        "  overlay   Vision JSON → SVG overlay\n"
+        "  debug     Image metadata\n"
+        "  audio     Speech, sound classification, Shazam, pitch, …\n"
+        "  capture   Screen, camera, microphone, list devices\n"
+        "  nl        NaturalLanguage\n"
+        "  av        AVFoundation (inspect, export, waveform, tts, …)\n"
         "\n"
         "COMMON OPTIONS:\n"
-        "  --img <path>          Path to a single image file\n"
-        "  --img-dir <path>      Directory containing images for batch/sequence mode\n"
-        "  --output <path>       Output directory for single image mode\n"
-        "  --output-dir <path>   Output directory for batch mode\n"
-        "  --debug               Draw bounding boxes / joints on the image\n"
-        "  --boxes-format <fmt>  Output format for debug images: png (default), jpg, tiff, bmp, gif\n"
-        "  --json <path>         Path to a Vision JSON file (used by svg subcommand)\n"
+        "  --input <path>        Primary input: image, video, audio, text file, directory (track / shazam-build)\n"
+        "  --output <path>       Meaning depends on subcommand (JSON file, media file, or .svg path)\n"
+        "  --json-output <path>  Write the JSON envelope to this file (default: stdout)\n"
+        "  --artifacts-dir <dir> PNG / debug overlays / isolate audio / optical-flow frames / capture media dir\n"
+        "  --debug               Draw boxes/joints or emit processing_ms where supported\n"
+        "  --boxes-format <fmt>  png (default), jpg, tiff, bmp, gif\n"
+        "  --json <path>         Vision JSON path (overlay subcommand)\n"
         "\n"
-        "OCR OPTIONS:\n"
-        "  --lang                Show supported recognition languages\n"
-        "  --merge               Merge all text outputs into a single file (batch mode)\n"
-        "  --rec-langs <langs>   Comma-separated recognition languages\n"
-        "\n"
-        "FACE OPTIONS:\n"
-        "  --operation <op>      Operation: face-rectangles (default), face-landmarks, face-quality,\n"
-        "                          human-rectangles, body-pose, hand-pose, animal-pose\n"
-        "  --svg                 Also produce an SVG overlay for each output JSON\n"
-        "  --show-labels         Show text labels in the SVG overlay (default: off)\n"
-        "\n"
-        "CLASSIFY OPTIONS:\n"
-        "  --operation <op>      Operation: classify (default), animals, rectangles, horizon,\n"
-        "                          contours, aesthetics, feature-print\n"
-        "  --svg                 Also produce an SVG overlay for each output JSON\n"
-        "  --show-labels         Show text labels in the SVG overlay (default: off)\n"
-        "\n"
-        "SEGMENT OPTIONS:\n"
-        "  --operation <op>      Operation: foreground-mask (default), person-segment,\n"
-        "                          person-mask, attention-saliency, objectness-saliency\n"
-        "\n"
-        "TRACK OPTIONS:\n"
-        "  --video <path>        Path to a video file\n"
-        "  --operation <op>      Operation: homographic (default), translational,\n"
-        "                          optical-flow, trajectories\n"
-        "\n"
-        "SVG OPTIONS:\n"
-        "  --json <path>         Path to Vision JSON file (required)\n"
-        "  --img <path>          Override source image (optional; falls back to info.filepath in JSON)\n"
-        "  --output <path>       Output directory for the SVG file\n"
-        "  --show-labels         Show text labels on shapes (default: off)\n"
+        "OCR: --lang, --rec-langs\n"
+        "FACE / CLASSIFY / SEGMENT / TRACK: --operation …\n"
+        "TRACK optical-flow: requires --artifacts-dir for flow PNGs.\n"
+        "OVERLAY: --json (required); --input overrides image; --output = .svg path (optional).\n"
+        "AUDIO: --operation …, --mic, --catalog, --audio-lang, --offline, --topk, windowing flags\n"
+        "CAPTURE: --operation …, --display-index\n"
+        "NL: --text, --input (text file), --operation …, --language, --scheme, --unit, --model, …\n"
+        "AV: --input; --operation …; --preset; --times; --videos (compose); tts: --text/--input\n"
     );
 }
 
@@ -75,20 +164,47 @@ int main(int argc, const char * argv[]) {
         // ── parse args ────────────────────────────────────────────────────────
 
         NSString *subcommand  = nil;
-        NSString *img         = nil;
-        NSString *imgDir      = nil;
+        NSString *inputPath   = nil;
         NSString *output      = nil;
-        NSString *outputDir   = nil;
-        NSString *video       = nil;
+        NSString *jsonOutputPath = nil;
+        NSString *artifactsDir = nil;
         BOOL debug            = NO;
         BOOL lang             = NO;
-        BOOL merge            = NO;
         BOOL showLabels       = NO;
-        BOOL svgOutput        = NO;
         NSString *recLangs    = nil;
         NSString *boxesFormat = @"png";
         NSString *operation   = nil;
         NSString *jsonPath    = nil;
+        NSInteger displayIndex = 0;
+
+        NSString *catalog     = nil;
+        NSString *audioLang   = @"en-US";
+        BOOL offline          = NO;
+        NSInteger topk        = 3;
+        BOOL mic              = NO;
+        BOOL classifyWindowSet   = NO;
+        NSTimeInterval classifyWindow = 0;
+        BOOL classifyOverlapSet  = NO;
+        double classifyOverlap   = 0;
+        NSInteger pitchHopFrames = 0;
+
+        NSString *nlText           = nil;
+        NSString *nlLanguage       = nil;
+        NSString *nlScheme         = nil;
+        NSString *nlTokenizerUnit  = nil;
+        NSString *nlWord           = nil;
+        NSString *nlWordA          = nil;
+        NSString *nlWordB          = nil;
+        NSString *nlSimilar        = nil;
+        NSString *nlModelPath      = nil;
+
+        NSString *avPreset      = nil;
+        NSString *avTime        = nil;
+        NSString *avTimes       = nil;
+        NSString *avTimeRange   = nil;
+        NSString *avMetaKey     = nil;
+        NSString *avVideos      = nil;
+        NSString *avVoice       = nil;
 
         for (NSInteger i = 1; i < (NSInteger)args.count; i++) {
             NSString *arg = args[i];
@@ -96,16 +212,14 @@ int main(int argc, const char * argv[]) {
             if ([arg isEqualToString:@"--help"] || [arg isEqualToString:@"-h"]) {
                 printUsage();
                 return 0;
-            } else if ([arg isEqualToString:@"--img"] && i + 1 < (NSInteger)args.count) {
-                img = args[++i];
-            } else if ([arg isEqualToString:@"--img-dir"] && i + 1 < (NSInteger)args.count) {
-                imgDir = args[++i];
+            } else if ([arg isEqualToString:@"--input"] && i + 1 < (NSInteger)args.count) {
+                inputPath = args[++i];
+            } else if ([arg isEqualToString:@"--json-output"] && i + 1 < (NSInteger)args.count) {
+                jsonOutputPath = args[++i];
+            } else if ([arg isEqualToString:@"--artifacts-dir"] && i + 1 < (NSInteger)args.count) {
+                artifactsDir = args[++i];
             } else if ([arg isEqualToString:@"--output"] && i + 1 < (NSInteger)args.count) {
                 output = args[++i];
-            } else if ([arg isEqualToString:@"--output-dir"] && i + 1 < (NSInteger)args.count) {
-                outputDir = args[++i];
-            } else if ([arg isEqualToString:@"--video"] && i + 1 < (NSInteger)args.count) {
-                video = args[++i];
             } else if ([arg isEqualToString:@"--rec-langs"] && i + 1 < (NSInteger)args.count) {
                 recLangs = args[++i];
             } else if ([arg isEqualToString:@"--boxes-format"] && i + 1 < (NSInteger)args.count) {
@@ -118,12 +232,60 @@ int main(int argc, const char * argv[]) {
                 debug = YES;
             } else if ([arg isEqualToString:@"--show-labels"]) {
                 showLabels = YES;
-            } else if ([arg isEqualToString:@"--svg"]) {
-                svgOutput = YES;
             } else if ([arg isEqualToString:@"--lang"]) {
                 lang = YES;
-            } else if ([arg isEqualToString:@"--merge"]) {
-                merge = YES;
+            } else if ([arg isEqualToString:@"--audio-lang"] && i + 1 < (NSInteger)args.count) {
+                audioLang = args[++i];
+            } else if ([arg isEqualToString:@"--catalog"] && i + 1 < (NSInteger)args.count) {
+                catalog = args[++i];
+            } else if ([arg isEqualToString:@"--offline"]) {
+                offline = YES;
+            } else if ([arg isEqualToString:@"--topk"] && i + 1 < (NSInteger)args.count) {
+                topk = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--classify-window"] && i + 1 < (NSInteger)args.count) {
+                classifyWindow = [args[++i] doubleValue];
+                classifyWindowSet = YES;
+            } else if ([arg isEqualToString:@"--classify-overlap"] && i + 1 < (NSInteger)args.count) {
+                classifyOverlap = [args[++i] doubleValue];
+                classifyOverlapSet = YES;
+            } else if ([arg isEqualToString:@"--pitch-hop"] && i + 1 < (NSInteger)args.count) {
+                pitchHopFrames = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--mic"]) {
+                mic = YES;
+            } else if ([arg isEqualToString:@"--display-index"] && i + 1 < (NSInteger)args.count) {
+                displayIndex = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--text"] && i + 1 < (NSInteger)args.count) {
+                nlText = args[++i];
+            } else if ([arg isEqualToString:@"--language"] && i + 1 < (NSInteger)args.count) {
+                nlLanguage = args[++i];
+            } else if ([arg isEqualToString:@"--scheme"] && i + 1 < (NSInteger)args.count) {
+                nlScheme = args[++i];
+            } else if ([arg isEqualToString:@"--unit"] && i + 1 < (NSInteger)args.count) {
+                nlTokenizerUnit = args[++i];
+            } else if ([arg isEqualToString:@"--word"] && i + 1 < (NSInteger)args.count) {
+                nlWord = args[++i];
+            } else if ([arg isEqualToString:@"--word-a"] && i + 1 < (NSInteger)args.count) {
+                nlWordA = args[++i];
+            } else if ([arg isEqualToString:@"--word-b"] && i + 1 < (NSInteger)args.count) {
+                nlWordB = args[++i];
+            } else if ([arg isEqualToString:@"--similar"] && i + 1 < (NSInteger)args.count) {
+                nlSimilar = args[++i];
+            } else if ([arg isEqualToString:@"--model"] && i + 1 < (NSInteger)args.count) {
+                nlModelPath = args[++i];
+            } else if ([arg isEqualToString:@"--preset"] && i + 1 < (NSInteger)args.count) {
+                avPreset = args[++i];
+            } else if ([arg isEqualToString:@"--time"] && i + 1 < (NSInteger)args.count) {
+                avTime = args[++i];
+            } else if ([arg isEqualToString:@"--times"] && i + 1 < (NSInteger)args.count) {
+                avTimes = args[++i];
+            } else if ([arg isEqualToString:@"--time-range"] && i + 1 < (NSInteger)args.count) {
+                avTimeRange = args[++i];
+            } else if ([arg isEqualToString:@"--key"] && i + 1 < (NSInteger)args.count) {
+                avMetaKey = args[++i];
+            } else if ([arg isEqualToString:@"--videos"] && i + 1 < (NSInteger)args.count) {
+                avVideos = args[++i];
+            } else if ([arg isEqualToString:@"--voice"] && i + 1 < (NSInteger)args.count) {
+                avVoice = args[++i];
             } else if (![arg hasPrefix:@"--"] && subcommand == nil) {
                 subcommand = arg;
             } else {
@@ -137,6 +299,10 @@ int main(int argc, const char * argv[]) {
             fprintf(stderr, "Error: missing subcommand\n");
             printUsage();
             return 1;
+        }
+
+        if ([subcommand isEqualToString:@"svg"]) {
+            subcommand = @"overlay";
         }
 
         // ── validate ──────────────────────────────────────────────────────────
@@ -153,81 +319,165 @@ int main(int argc, const char * argv[]) {
         NSError *error = nil;
         BOOL success = NO;
 
+        NSString *visionIn = inputPath;
+        NSString *effOp = MVMainEffectiveOperation(subcommand, operation);
+        NSString *jsonStem = visionIn;
+        if ([subcommand isEqualToString:@"track"]) {
+            jsonStem = inputPath ?: @"";
+        } else if ([subcommand isEqualToString:@"audio"]) {
+            jsonStem = inputPath ?: @"";
+        } else if ([subcommand isEqualToString:@"nl"]) {
+            jsonStem = inputPath ?: @"";
+        } else if ([subcommand isEqualToString:@"overlay"]) {
+            jsonStem = jsonPath.length ? jsonPath : @"";
+        }
+        NSString *jsonOutResolved = MVMainResolvedJSONOutput(subcommand, effOp, jsonOutputPath, output, jsonStem);
+        NSString *artResolved = MVMainResolvedArtifactsDir(subcommand, operation, artifactsDir, output);
+
         if ([subcommand isEqualToString:@"ocr"]) {
             OCRProcessor *processor = [[OCRProcessor alloc] init];
-            processor.img         = img;
-            processor.output      = output;
-            processor.imgDir      = imgDir;
-            processor.outputDir   = outputDir;
+            processor.inputPath   = visionIn;
+            processor.jsonOutput  = jsonOutResolved;
+            processor.artifactsDir = artResolved;
             processor.debug       = debug;
             processor.lang        = lang;
-            processor.merge       = merge;
             processor.recLangs    = recLangs;
             processor.boxesFormat = boxesFormat;
             success = [processor runWithError:&error];
 
         } else if ([subcommand isEqualToString:@"debug"]) {
             DebugProcessor *processor = [[DebugProcessor alloc] init];
-            processor.img       = img;
-            processor.output    = output;
-            processor.imgDir    = imgDir;
-            processor.outputDir = outputDir;
+            processor.inputPath    = visionIn;
+            processor.jsonOutput   = jsonOutResolved;
             success = [processor runWithError:&error];
 
         } else if ([subcommand isEqualToString:@"segment"]) {
             SegmentProcessor *processor = [[SegmentProcessor alloc] init];
-            processor.img       = img;
-            processor.output    = output;
-            processor.imgDir    = imgDir;
-            processor.outputDir = outputDir;
-            processor.operation = operation ?: @"foreground-mask";
+            processor.inputPath    = visionIn;
+            processor.jsonOutput   = jsonOutResolved;
+            processor.artifactsDir = artResolved;
+            processor.operation    = operation ?: @"foreground-mask";
             success = [processor runWithError:&error];
 
         } else if ([subcommand isEqualToString:@"face"]) {
             FaceProcessor *processor = [[FaceProcessor alloc] init];
-            processor.img         = img;
-            processor.output      = output;
-            processor.imgDir      = imgDir;
-            processor.outputDir   = outputDir;
-            processor.debug       = debug;
-            processor.svg         = svgOutput;
-            processor.svgLabels   = showLabels;
-            processor.boxesFormat = boxesFormat;
-            processor.operation   = operation ?: @"face-rectangles";
+            processor.inputPath    = visionIn;
+            processor.jsonOutput   = jsonOutResolved;
+            processor.artifactsDir = artResolved;
+            processor.debug        = debug;
+            processor.boxesFormat  = boxesFormat;
+            processor.operation    = operation ?: @"face-rectangles";
             success = [processor runWithError:&error];
 
         } else if ([subcommand isEqualToString:@"classify"]) {
             ClassifyProcessor *processor = [[ClassifyProcessor alloc] init];
-            processor.img         = img;
-            processor.output      = output;
-            processor.imgDir      = imgDir;
-            processor.outputDir   = outputDir;
-            processor.debug       = debug;
-            processor.svg         = svgOutput;
-            processor.svgLabels   = showLabels;
-            processor.boxesFormat = boxesFormat;
-            processor.operation   = operation ?: @"classify";
+            processor.inputPath    = visionIn;
+            processor.jsonOutput   = jsonOutResolved;
+            processor.artifactsDir = artResolved;
+            processor.debug        = debug;
+            processor.boxesFormat  = boxesFormat;
+            processor.operation    = operation ?: @"classify";
             success = [processor runWithError:&error];
 
         } else if ([subcommand isEqualToString:@"track"]) {
             TrackProcessor *processor = [[TrackProcessor alloc] init];
-            processor.video      = video;
-            processor.imgDir     = imgDir;
-            processor.output     = output;
-            processor.outputDir  = outputDir;
-            processor.operation  = operation ?: @"homographic";
+            processor.inputPath    = inputPath;
+            processor.jsonOutput   = jsonOutResolved;
+            processor.artifactsDir = artifactsDir.length ? artifactsDir : artResolved;
+            processor.operation    = operation ?: @"homographic";
             success = [processor runWithError:&error];
 
-        } else if ([subcommand isEqualToString:@"svg"]) {
-            SVGProcessor *processor = [[SVGProcessor alloc] init];
-            processor.img        = img;
-            processor.jsonPath   = jsonPath;
-            processor.output     = output;
-            processor.showLabels = showLabels;
+        } else if ([subcommand isEqualToString:@"overlay"]) {
+            OverlayProcessor *processor = [[OverlayProcessor alloc] init];
+            processor.jsonPath     = jsonPath;
+            processor.inputPath    = visionIn;
+            processor.svgOutput    = output;
+            processor.jsonOutput   = jsonOutputPath.length ? jsonOutputPath : jsonOutResolved;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"audio"]) {
+            AudioProcessor *processor = [[AudioProcessor alloc] init];
+            processor.inputPath    = inputPath;
+            processor.jsonOutput   = jsonOutResolved;
+            processor.artifactsDir = artifactsDir.length ? artifactsDir : artResolved;
+            processor.operation    = operation ?: @"classify";
+            processor.lang         = audioLang;
+            processor.offline      = offline;
+            processor.topk         = topk;
+            processor.debug        = debug;
+            processor.mic          = mic;
+            processor.catalog      = catalog;
+            processor.classifyWindowDurationSet = classifyWindowSet;
+            processor.classifyWindowDuration    = classifyWindow;
+            processor.classifyOverlapFactorSet  = classifyOverlapSet;
+            processor.classifyOverlapFactor     = classifyOverlap;
+            processor.pitchHopFrames            = pitchHopFrames;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"capture"]) {
+            CaptureProcessor *processor = [[CaptureProcessor alloc] init];
+            NSString *capOp = operation ?: @"screenshot";
+            processor.operation    = capOp;
+            processor.mediaOutput  = output;
+            processor.artifactsDir = artifactsDir.length ? artifactsDir : artResolved;
+            if (jsonOutputPath.length) {
+                processor.jsonOutput = jsonOutputPath;
+            } else if ([capOp isEqualToString:@"list-devices"] && output.length) {
+                processor.jsonOutput = output;
+            } else {
+                processor.jsonOutput = nil;
+            }
+            processor.displayIndex = displayIndex;
+            processor.debug        = debug;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"nl"]) {
+            NLProcessor *processor = [[NLProcessor alloc] init];
+            processor.text         = nlText;
+            processor.input          = inputPath;
+            processor.operation      = operation ?: @"detect-language";
+            processor.language       = nlLanguage;
+            processor.scheme         = nlScheme;
+            processor.unit           = nlTokenizerUnit;
+            processor.topk           = topk;
+            processor.word           = nlWord;
+            processor.wordA          = nlWordA;
+            processor.wordB          = nlWordB;
+            processor.similar        = nlSimilar;
+            processor.modelPath      = nlModelPath;
+            processor.jsonOutput     = jsonOutResolved;
+            processor.debug          = debug;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"av"]) {
+            AVProcessor *processor = [[AVProcessor alloc] init];
+            NSString *avOp = operation ?: @"inspect";
+            processor.operation = avOp;
+            if ([avOp isEqualToString:@"tts"]) {
+                processor.inputFile = inputPath;
+            } else if (inputPath.length) {
+                if (MVPathLooksLikeStillImage(inputPath)) {
+                    processor.img = inputPath;
+                } else {
+                    processor.video = inputPath;
+                }
+            }
+            processor.output       = output.length ? output : jsonOutputPath;
+            processor.artifactsDir = artifactsDir;
+            processor.preset       = avPreset;
+            processor.timeStr      = avTime;
+            processor.timesStr     = avTimes;
+            processor.timeRangeStr = avTimeRange;
+            processor.metaKey      = avMetaKey;
+            processor.videosStr    = avVideos;
+            processor.text         = nlText;
+            processor.inputFile    = inputPath;
+            processor.voice        = avVoice;
+            processor.debug        = debug;
             success = [processor runWithError:&error];
 
         } else {
-            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, svg, debug\n",
+            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, overlay (svg), debug, audio, capture, nl, av\n",
                     subcommand.UTF8String);
             return 1;
         }
