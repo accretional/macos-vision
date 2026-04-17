@@ -1,0 +1,31 @@
+name: "smoke_test"
+
+steps: {
+  label: "set_viewport"
+  set_viewport: {
+    width: 1280
+    height: 800
+    device_scale_factor: 2
+  }
+}
+
+steps: {
+  label: "navigate"
+  navigate: {
+    url: "https://example.com"
+  }
+}
+
+steps: {
+  label: "wait_for_render"
+  wait: {
+    milliseconds: 500
+  }
+}
+
+steps: {
+  label: "screenshot"
+  screenshot: {
+    format: "png"
+  }
+}
