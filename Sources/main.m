@@ -12,6 +12,8 @@
 #import "av/main.h"
 #import "speech/main.h"
 #import "sna/main.h"
+#import "coreimage/main.h"
+#import "imagecapture/main.h"
 
 static BOOL MVPathLooksLikeStillImage(NSString *path) {
     if (!path.length) return NO;
@@ -47,11 +49,14 @@ static NSString *MVMainEffectiveOperation(NSString *subcommand, NSString *operat
     if ([subcommand isEqualToString:@"nl"]) return @"detect-language";
     if ([subcommand isEqualToString:@"speech"]) return @"transcribe";
     if ([subcommand isEqualToString:@"sna"]) return @"classify";
+    if ([subcommand isEqualToString:@"coreimage"]) return @"apply-filter";
+    if ([subcommand isEqualToString:@"imagecapture"]) return @"list-devices";
     return @"default";
 }
 
 static NSString *MVMainJsonInDirectory(NSString *dir, NSString *subcommand, NSString *operation, NSString *stemPath) {
     NSString *op = [operation stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+    op = [op stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
     if ([subcommand isEqualToString:@"track"]) {
         // Stable names for gallery / field journal: track_<op>.json (optical-flow under optical-flow/)
         NSString *base = [NSString stringWithFormat:@"track_%@", op];
@@ -117,6 +122,11 @@ static NSString *MVMainResolvedArtifactsDir(NSString *subcommand,
         NSString *cap = MVMainEffectiveOperation(subcommand, operation).lowercaseString;
         if (![cap isEqualToString:@"list-devices"]) return outOpt;
     }
+    if ([subcommand isEqualToString:@"coreimage"]) {
+        NSString *op = MVMainEffectiveOperation(subcommand, operation).lowercaseString;
+        if ([op isEqualToString:@"apply-filter"] || [op isEqualToString:@"suggest-filters"]) return outOpt;
+        return nil;
+    }
     return nil;
 }
 
@@ -138,6 +148,8 @@ static void printUsage(void) {
         "  av        AVFoundation (inspect, export, waveform, tts, …)\n"
         "  speech    Speech framework (transcribe, voice-analytics, list-locales)\n"
         "  sna       SoundAnalysis (classify, classify-custom, list-labels)\n"
+        "  coreimage    CoreImage (apply-filter, suggest-filters, list-filters)\n"
+        "  imagecapture ImageCaptureCore (list-devices, camera/*, scanner/*)\n"
         "\n"
         "COMMON OPTIONS:\n"
         "  --input <path>        Primary input: image, video, audio, text file, directory (track / shazam-build)\n"
@@ -158,6 +170,12 @@ static void printUsage(void) {
         "AV: --input; --operation …; --preset; --times; --videos (compose); tts: --text/--input\n"
         "SPEECH: --input (audio file); --operation …; --audio-lang; --offline; --debug\n"
         "SNA: --input (audio file); --operation …; --topk; --classify-window; --classify-overlap; --model (classify-custom / list-labels)\n"
+        "COREIMAGE:    --input (image); --operation …; --filter-name <CIFilterName>; --filter-params <json>; --format png|jpg|heif|tiff; --apply (suggest-filters); --category-only (list-filters)\n"
+        "IMAGECAPTURE: --operation …; --device-index <N>; --file-index <N>; --all; --delete-after;\n"
+        "              --sidecars; --thumb-size <px>; --dpi <N>; --format tiff|jpeg|png; --output <path>\n"
+        "  Ops: list-devices | camera/files | camera/thumbnail | camera/metadata |\n"
+        "       camera/import | camera/delete | camera/capture | camera/sync-clock |\n"
+        "       scanner/preview | scanner/scan\n"
     );
 }
 
@@ -185,6 +203,7 @@ int main(int argc, const char * argv[]) {
         NSString *operation   = nil;
         NSString *jsonPath    = nil;
         NSInteger displayIndex = 0;
+        NSInteger deviceIndex  = 0;
 
         NSString *catalog     = nil;
         NSString *audioLang   = @"en-US";
@@ -214,6 +233,19 @@ int main(int argc, const char * argv[]) {
         NSString *avMetaKey     = nil;
         NSString *avVideos      = nil;
         NSString *avVoice       = nil;
+
+        NSString *ciFilterName   = nil;
+        NSString *ciFilterParams = nil;
+        NSString *ciFormat       = @"png";
+        BOOL ciCategoryOnly      = NO;
+        BOOL ciApply             = NO;
+
+        NSInteger iccFileIndex  = 0;
+        BOOL iccAll             = NO;
+        BOOL iccDeleteAfter     = NO;
+        BOOL iccSidecars        = NO;
+        NSInteger iccThumbSize  = 0;
+        NSInteger iccDpi        = 0;
 
         for (NSInteger i = 1; i < (NSInteger)args.count; i++) {
             NSString *arg = args[i];
@@ -263,6 +295,8 @@ int main(int argc, const char * argv[]) {
                 mic = YES;
             } else if ([arg isEqualToString:@"--display-index"] && i + 1 < (NSInteger)args.count) {
                 displayIndex = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--device-index"] && i + 1 < (NSInteger)args.count) {
+                deviceIndex = [args[++i] integerValue];
             } else if ([arg isEqualToString:@"--text"] && i + 1 < (NSInteger)args.count) {
                 nlText = args[++i];
             } else if ([arg isEqualToString:@"--language"] && i + 1 < (NSInteger)args.count) {
@@ -295,6 +329,28 @@ int main(int argc, const char * argv[]) {
                 avVideos = args[++i];
             } else if ([arg isEqualToString:@"--voice"] && i + 1 < (NSInteger)args.count) {
                 avVoice = args[++i];
+            } else if ([arg isEqualToString:@"--filter-name"] && i + 1 < (NSInteger)args.count) {
+                ciFilterName = args[++i];
+            } else if ([arg isEqualToString:@"--filter-params"] && i + 1 < (NSInteger)args.count) {
+                ciFilterParams = args[++i];
+            } else if ([arg isEqualToString:@"--format"] && i + 1 < (NSInteger)args.count) {
+                ciFormat = args[++i];
+            } else if ([arg isEqualToString:@"--apply"]) {
+                ciApply = YES;
+            } else if ([arg isEqualToString:@"--category-only"]) {
+                ciCategoryOnly = YES;
+            } else if ([arg isEqualToString:@"--file-index"] && i + 1 < (NSInteger)args.count) {
+                iccFileIndex = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--all"]) {
+                iccAll = YES;
+            } else if ([arg isEqualToString:@"--delete-after"]) {
+                iccDeleteAfter = YES;
+            } else if ([arg isEqualToString:@"--sidecars"]) {
+                iccSidecars = YES;
+            } else if ([arg isEqualToString:@"--thumb-size"] && i + 1 < (NSInteger)args.count) {
+                iccThumbSize = [args[++i] integerValue];
+            } else if ([arg isEqualToString:@"--dpi"] && i + 1 < (NSInteger)args.count) {
+                iccDpi = [args[++i] integerValue];
             } else if (![arg hasPrefix:@"--"] && subcommand == nil) {
                 subcommand = arg;
             } else {
@@ -341,6 +397,10 @@ int main(int argc, const char * argv[]) {
             jsonStem = inputPath ?: @"";
         } else if ([subcommand isEqualToString:@"sna"]) {
             jsonStem = inputPath ?: @"";
+        } else if ([subcommand isEqualToString:@"coreimage"]) {
+            jsonStem = inputPath ?: @"";
+        } else if ([subcommand isEqualToString:@"imagecapture"]) {
+            jsonStem = @"";
         } else if ([subcommand isEqualToString:@"overlay"]) {
             jsonStem = jsonPath.length ? jsonPath : @"";
         }
@@ -505,8 +565,44 @@ int main(int argc, const char * argv[]) {
             processor.debug            = debug;
             success = [processor runWithError:&error];
 
+        } else if ([subcommand isEqualToString:@"coreimage"]) {
+            CIProcessor *processor = [[CIProcessor alloc] init];
+            processor.inputPath        = visionIn;
+            processor.jsonOutput       = jsonOutResolved;
+            processor.artifactsDir     = artResolved;
+            processor.operation        = operation ?: @"apply-filter";
+            processor.filterName       = ciFilterName;
+            processor.filterParamsJSON = ciFilterParams;
+            processor.outputFormat     = ciFormat;
+            processor.applyFilters     = ciApply;
+            processor.categoryOnly     = ciCategoryOnly;
+            processor.debug            = debug;
+            // Exact image output file when --output is not a directory and not a .json file
+            if (output.length && !MVPathIsExistingDirectory(output)
+                && ![[output.pathExtension lowercaseString] isEqualToString:@"json"]) {
+                processor.outputPath = output;
+            }
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"imagecapture"]) {
+            ICCProcessor *processor = [[ICCProcessor alloc] init];
+            processor.operation        = operation ?: @"list-devices";
+            processor.jsonOutput       = jsonOutResolved;
+            processor.deviceIndex      = deviceIndex;
+            processor.debug            = debug;
+            processor.fileIndex        = iccFileIndex;
+            processor.allFiles         = iccAll;
+            processor.deleteAfter      = iccDeleteAfter;
+            processor.downloadSidecars = iccSidecars;
+            processor.thumbSize        = iccThumbSize;
+            processor.scanDPI          = (NSUInteger)iccDpi;
+            processor.outputFormat     = ciFormat;
+            // Pass raw --output to processor; each operation decides how to use it
+            if (output.length) processor.outputPath = output;
+            success = [processor runWithError:&error];
+
         } else {
-            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, overlay (svg), debug, shazam, capture, nl, av, speech, sna\n",
+            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, overlay (svg), debug, shazam, capture, nl, av, speech, sna, coreimage, imagecapture\n",
                     subcommand.UTF8String);
             return 1;
         }

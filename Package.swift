@@ -25,6 +25,7 @@ let package = Package(
                 .linkedFramework("ShazamKit"),
                 .linkedFramework("NaturalLanguage"),
                 .linkedFramework("CoreML"),
+                .linkedFramework("ImageCaptureCore"),
             ]
         ),
     ]
