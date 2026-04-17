@@ -12,3 +12,7 @@ playground
 Package.resolved
 sample_data/output/
 temp*/
+docs/apple-navbar-docs.html
+docs/parse_apple_navbar.py
+chrome-testing/screenshots/*.png
+chrome-testing/go.sum

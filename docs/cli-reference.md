@@ -108,21 +108,17 @@ Reads the `operation` field in the JSON and writes an SVG overlay. Operations wi
 
 ---
 
-## `audio`
+## `shazam` (ShazamKit)
 
-**Flags:** `--input`, `--json-output`, `--artifacts-dir`, `--operation`, `--audio-lang`, `--offline`, `--topk`, `--catalog`, `--debug`, `--mic`, windowing flags as in `--help`
+**Flags:** `--input` (audio file or directory for `build`), `--output` / `--json-output`, `--artifacts-dir`, `--operation`, `--catalog` (`.shazamcatalog` path for `match-custom`; output dir for `build`), `--debug`
+
+> Note: All operations require macOS 12.0+.
 
 | Operation | Description |
 |-----------|-------------|
-| `classify` *(default)* | Sound classification top-K (macOS 12+, `SNClassifySoundRequest`) |
-| `transcribe` | Speech-to-text (`SFSpeechRecognizer`) |
-| `shazam` | Song ID (ShazamKit, macOS 12+) |
-| `shazam-custom` | Match against `.shazamcatalog` (`--catalog`) |
-| `shazam-build` | Build `.shazamcatalog` from audio |
-| `detect` | Sound event detection with timestamps |
-| `noise` | Noise / RMS over time |
-| `pitch` | Pitch (fundamental frequency) over time |
-| `isolate` | Voice isolation (outputs processed audio path) |
+| `match` *(default)* | Song / audio identification against the Shazam catalog (`SHSession`) |
+| `match-custom` | Match against a custom `.shazamcatalog` file (`--catalog`) |
+| `build` | Build a `.shazamcatalog` from a directory of audio files (`--input` = directory) |
 
 ## `capture`
 
@@ -155,7 +151,7 @@ Reads the `operation` field in the JSON and writes an SVG overlay. Operations wi
 
 ## `av` (AVFoundation)
 
-**Flags:** `--input`, `--output`, `--artifacts-dir`, `--operation`, `--preset`, `--time`, `--times`, `--time-range`, `--key`, `--videos`, `--text`, `--voice`
+**Flags:** `--input`, `--output`, `--artifacts-dir`, `--operation`, `--preset`, `--time`, `--times`, `--time-range`, `--key`, `--videos`, `--text`, `--voice`, `--pitch-hop`
 
 | Operation | Description |
 |-----------|-------------|
@@ -168,9 +164,41 @@ Reads the `operation` field in the JSON and writes an SVG overlay. Operations wi
 | `list-presets` | List export presets |
 | `compose` | Concatenate `--videos` |
 | `waveform` | Waveform samples (JSON) |
+| `noise` | RMS / noise level over 100 ms windows; works on audio and video files |
+| `pitch` | Fundamental frequency per hop (`--pitch-hop` frames, default 512); works on audio and video files |
+| `isolate` | Voice isolation via 150 Hz high-pass filter; `--output` sets the output audio path |
 | `tts` | Text-to-speech (`--text` or `--input`, optional `--voice`); writes AAC (`.m4a`, `.aac`, `.mp4`, …) by default — extensionless `--output` becomes `.m4a`; `.wav`/`.aif`/`.aiff` selects 16-bit PCM |
 
 **Presets** (subset): `low`, `medium`, `high`, `hevc-1080p`, `hevc-4k`, `prores-422`, `prores-4444`, `m4a`, `passthrough`
+
+---
+
+## `sna` (SoundAnalysis)
+
+**Flags:** `--input` (audio file), `--output` / `--json-output`, `--operation`, `--topk` (default 5), `--classify-window` (window duration in seconds, macOS 12+), `--classify-overlap` (overlap factor [0,1)), `--model` (CoreML model path for `classify-custom` / `list-labels`), `--debug`
+
+> Note: `classify` and `list-labels` require macOS 12.0+ (`SNClassifierIdentifierVersion1`). `classify-custom` works on macOS 10.15+. The built-in classifier default window is **3 seconds** — audio files shorter than 3 s produce no windows.
+
+| Operation | Description |
+|-----------|-------------|
+| `classify` *(default)* | Sound classification using Apple's built-in classifier (`SNClassifierIdentifierVersion1`, macOS 12+); returns per-window top-K labels with confidence, window duration, and overlap factor |
+| `classify-custom` | Classification using a custom CoreML audio model (`--model`); same output shape as `classify` |
+| `detect` | Event detection filtered to target keywords (crying, scream, alarm, siren, dog, cat, baby, glass); returns only matching windows (macOS 12+) |
+| `list-labels` | All 303 known sound labels from the built-in classifier (or a custom model with `--model`); no audio input required |
+
+---
+
+## `speech`
+
+**Flags:** `--input` (audio file), `--output` / `--json-output`, `--operation`, `--audio-lang` (default `en-US`), `--offline`, `--debug`
+
+> Note: `transcribe` and `voice-analytics` require Speech Recognition permission granted in System Settings → Privacy & Security → Speech Recognition. On macOS 26, the binary must be signed with a Developer ID certificate to trigger the permission prompt. `list-locales` has no authorization requirement.
+
+| Operation | Description |
+|-----------|-------------|
+| `transcribe` *(default)* | Speech-to-text from audio file; returns transcript, per-segment timestamps, confidence, and alternative word hypotheses (`SFSpeechRecognizer`) |
+| `voice-analytics` | Speaking rate, pause duration, and vocal quality metrics — pitch (ln normalized), jitter (%), shimmer (dB), voicing probability (`SFSpeechRecognitionMetadata`, macOS 11.3+; requires `--offline` / on-device recognition) |
+| `list-locales` | All locales supported by `SFSpeechRecognizer.supportedLocales` |
 
 ---
 
