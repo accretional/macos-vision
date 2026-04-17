@@ -351,6 +351,9 @@ int main(int argc, const char * argv[]) {
                 iccThumbSize = [args[++i] integerValue];
             } else if ([arg isEqualToString:@"--dpi"] && i + 1 < (NSInteger)args.count) {
                 iccDpi = [args[++i] integerValue];
+            } else if ([arg hasPrefix:@"-psn_"]) {
+                // LaunchServices injects -psn_0_XXXXX when an app is launched via `open`.
+                // Skip it so the subcommand argument is parsed correctly.
             } else if (![arg hasPrefix:@"--"] && subcommand == nil) {
                 subcommand = arg;
             } else {

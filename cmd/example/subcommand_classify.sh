@@ -17,7 +17,7 @@ overlay_classify() {
     op="${operation//-/_}"
     json="$OUTPUT/${stem}_${op}.json"
     if [ ! -f "$json" ]; then
-        echo "  SKIP  overlay ($json not found)"
+        echo "  SKIP  overlay (source json not found)"
         return
     fi
     if [ ! -f "$img" ]; then

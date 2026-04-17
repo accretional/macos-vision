@@ -44,6 +44,6 @@ macos-vision audio --input clip.m4a --operation classify --topk 5 --output ./out
 ## Examples and tests
 
 ```bash
-bash cmd/example/all_subcommands.sh   # populate sample_data/output/, inject JSON into sample_data/journal/*.html, open sample_data/macos_cli_gallery.html (iframe hub), run overlay, write journal/panels/*.html
+bash cmd/example/all_subcommands.sh   # populate sample_data/output/
 bash tests/smoke-test.sh              # build + subcommand smoke tests
 ```

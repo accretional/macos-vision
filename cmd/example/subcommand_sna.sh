@@ -23,7 +23,7 @@ fi
 run_file() {
     local label="$1" audio_file="$2"; shift 2
     if [ ! -f "$audio_file" ]; then
-        echo "  SKIP  $label ($audio_file not found)"
+        echo "  SKIP  $label ($(basename "$audio_file") not found)"
         return
     fi
     echo "  RUN   $label"

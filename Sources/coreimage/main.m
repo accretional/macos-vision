@@ -29,7 +29,7 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    NSArray *validOps = @[@"apply-filter", @"suggest-filters", @"list-filters"];
+    NSArray *validOps = @[@"apply-filter", @"suggest-filters", @"list-filters", @"auto-adjust"];
     if (![validOps containsObject:self.operation]) {
         if (error) {
             *error = [NSError errorWithDomain:CIProcessorErrorDomain
@@ -65,6 +65,13 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
 
     if ([self.operation isEqualToString:@"suggest-filters"]) {
         NSDictionary *result = [self suggestFiltersWithError:error];
+        if (!result) return NO;
+        NSDictionary *envelope = MVMakeEnvelope(@"coreimage", self.operation, self.inputPath, result);
+        return MVEmitEnvelope(envelope, self.jsonOutput, error);
+    }
+
+    if ([self.operation isEqualToString:@"auto-adjust"]) {
+        NSDictionary *result = [self autoAdjustWithError:error];
         if (!result) return NO;
         NSDictionary *envelope = MVMakeEnvelope(@"coreimage", self.operation, self.inputPath, result);
         return MVEmitEnvelope(envelope, self.jsonOutput, error);
@@ -198,6 +205,75 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
     } mutableCopy];
 
     if (appliedParams.count > 0) result[@"params"] = [appliedParams copy];
+
+    if (self.debug && start) {
+        result[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
+    }
+
+    return result;
+}
+
+// ── auto-adjust ───────────────────────────────────────────────────────────────
+
+- (nullable NSDictionary *)autoAdjustWithError:(NSError **)error {
+    if (!self.inputPath.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:CIProcessorErrorDomain
+                                         code:CIProcessorErrorMissingInput
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                    @"auto-adjust requires an input image. Provide --input <image>."}];
+        }
+        return nil;
+    }
+    NSURL *inputURL = [NSURL fileURLWithPath:self.inputPath];
+    CIImage *image = [CIImage imageWithContentsOfURL:inputURL];
+    if (!image) {
+        if (error) {
+            *error = [NSError errorWithDomain:CIProcessorErrorDomain
+                                         code:CIProcessorErrorImageLoadFailed
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                                    [NSString stringWithFormat:@"Failed to load image: %@",
+                                                     self.inputPath]}];
+        }
+        return nil;
+    }
+
+    NSDate *start = self.debug ? [NSDate date] : nil;
+
+    NSArray<CIFilter *> *filters = [image autoAdjustmentFiltersWithOptions:nil];
+
+    // Apply all filters in sequence
+    CIImage *current = image;
+    NSMutableArray<NSDictionary *> *filterEntries = [NSMutableArray arrayWithCapacity:filters.count];
+    for (CIFilter *f in filters) {
+        [f setValue:current forKey:kCIInputImageKey];
+        CIImage *out = f.outputImage;
+        if (out) current = out;
+        [filterEntries addObject:@{ @"name": f.name }];
+    }
+
+    // Clamp infinite extent
+    CGRect renderRect = current.extent;
+    if (isinf(renderRect.size.width) || isinf(renderRect.size.height) ||
+        isinf(renderRect.origin.x) || isinf(renderRect.origin.y)) {
+        renderRect = image.extent;
+        current = [current imageByCroppingToRect:renderRect];
+    }
+
+    NSString *outPath = [self resolveOutputPathForInput:self.inputPath filter:@"auto_adjust"];
+    if (![self ensureDirectory:outPath.stringByDeletingLastPathComponent error:error]) return nil;
+
+    NSData *imgData = [self renderImage:current error:error];
+    if (!imgData) return nil;
+    if (![imgData writeToFile:outPath options:NSDataWritingAtomic error:error]) return nil;
+
+    NSMutableDictionary *result = [@{
+        @"input":     MVRelativePath(self.inputPath),
+        @"output":    MVRelativePath(outPath),
+        @"format":    [self outputExtension],
+        @"filters":   [filterEntries copy],
+        @"artifacts": @[MVArtifactEntry(outPath, @"adjusted_image")],
+    } mutableCopy];
 
     if (self.debug && start) {
         result[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));

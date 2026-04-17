@@ -11,7 +11,7 @@ pass() { echo "  PASS  $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
 
 has_frames=false
-if [ -d "$FRAMES" ] && ls "$FRAMES"/*.jpg "$FRAMES"/*.png &>/dev/null 2>&1; then
+if [ -d "$FRAMES" ] && { ls "$FRAMES"/*.jpg &>/dev/null 2>&1 || ls "$FRAMES"/*.png &>/dev/null 2>&1; }; then
     has_frames=true
 fi
 

@@ -378,7 +378,6 @@ static NSString * const OV_SCRIPT =
     NSString *svg = [self generateSVGWithError:error];
     if (!svg) return NO;
     if (![svg writeToFile:outputPath atomically:YES encoding:NSUTF8StringEncoding error:error]) return NO;
-    fprintf(stderr, "SVG saved to: %s\n", outputPath.UTF8String);
     return YES;
 }
 

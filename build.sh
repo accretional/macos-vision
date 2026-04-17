@@ -21,6 +21,17 @@ BINARY="$ROOT/.build/debug/macos-vision"
 if [[ ! -f "$BINARY" ]]; then
   err "Build finished but binary not found at $BINARY"
 fi
+
+# ── Sign with entitlements ────────────────────────────────────────────────────
+# com.apple.security.speech-recognition is a Hardened Runtime entitlement —
+# TCC only respects it when --options runtime is set. Ad-hoc signing is
+# sufficient for local development on macOS 26.
+ENTITLEMENTS="$ROOT/macos-vision.entitlements"
+if [[ -f "$ENTITLEMENTS" ]]; then
+  codesign --force --sign - --options runtime --entitlements "$ENTITLEMENTS" "$BINARY" 2>/dev/null
+  ok "Signed (adhoc+runtime) with entitlements"
+fi
+
 ok "Binary: $BINARY"
 
 log "Build complete."

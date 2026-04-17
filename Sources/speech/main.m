@@ -17,7 +17,7 @@ static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
 // ── Public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    NSArray *validOps = @[@"transcribe", @"voice-analytics", @"list-locales"];
+    NSArray *validOps = @[@"transcribe", @"voice-analytics", @"list-locales", @"authorize", @"authorize-internal"];
     if (![validOps containsObject:self.operation]) {
         if (error) {
             *error = [NSError errorWithDomain:SpeechErrorDomain code:1
@@ -26,6 +26,14 @@ static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
                                                      self.operation, [validOps componentsJoinedByString:@", "]]}];
         }
         return NO;
+    }
+
+    if ([self.operation isEqualToString:@"authorize"]) {
+        return [self authorizeWithError:error];
+    }
+
+    if ([self.operation isEqualToString:@"authorize-internal"]) {
+        return [self authorizeInternalWithError:error];
     }
 
     if ([self.operation isEqualToString:@"list-locales"]) {
@@ -58,16 +66,186 @@ static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
-// ── Authorization check ───────────────────────────────────────────────────────
+// ── authorize ─────────────────────────────────────────────────────────────────
+//
+// On macOS 26+, TCC resolves the "responsible process" (the IDE or terminal that
+// launched this binary) when a CLI tool calls requestAuthorization:. Because no
+// terminal app declares NSSpeechRecognitionUsageDescription, TCC sends SIGKILL
+// before the dialog can appear.
+//
+// The workaround: wrap this binary in a minimal .app bundle inside /tmp and open
+// it via NSWorkspace. macOS resolves the bundle's Info.plist for TCC, shows the
+// permission dialog attributed to this app's bundle ID, and grants the permission.
+// Subsequent runs check authorizationStatus (never calling requestAuthorization:)
+// and proceed normally once the status is .authorized.
+
+- (BOOL)authorizeWithError:(NSError **)error {
+    SFSpeechRecognizerAuthorizationStatus current = [SFSpeechRecognizer authorizationStatus];
+    if (current == SFSpeechRecognizerAuthorizationStatusAuthorized) {
+        fprintf(stdout, "Speech recognition is already authorized.\n");
+        return YES;
+    }
+    if (current == SFSpeechRecognizerAuthorizationStatusDenied) {
+        if (error) {
+            *error = [NSError errorWithDomain:SpeechErrorDomain code:14
+                userInfo:@{NSLocalizedDescriptionKey:
+                    @"Speech recognition was previously denied. "
+                     "Re-enable it in System Settings → Privacy & Security → Speech Recognition."}];
+        }
+        return NO;
+    }
+    if (current == SFSpeechRecognizerAuthorizationStatusRestricted) {
+        if (error) {
+            *error = [NSError errorWithDomain:SpeechErrorDomain code:15
+                userInfo:@{NSLocalizedDescriptionKey:
+                    @"Speech recognition is restricted on this device (MDM policy)."}];
+        }
+        return NO;
+    }
+
+    // Build a temporary .app bundle containing this binary and a proper Info.plist.
+    // TCC walks up the directory tree from the binary path to find the enclosing
+    // bundle, reads Contents/Info.plist, and uses it for the permission dialog.
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *tmp = NSTemporaryDirectory();
+    NSString *appPath   = [tmp stringByAppendingPathComponent:@"macos-vision-auth.app"];
+    NSString *macosDir  = [appPath stringByAppendingPathComponent:@"Contents/MacOS"];
+    NSString *plistPath = [appPath stringByAppendingPathComponent:@"Contents/Info.plist"];
+    NSString *binaryDst = [macosDir stringByAppendingPathComponent:@"macos-vision-auth"];
+
+    // Clean any stale bundle from a previous run.
+    [fm removeItemAtPath:appPath error:nil];
+
+    NSError *mkErr = nil;
+    if (![fm createDirectoryAtPath:macosDir withIntermediateDirectories:YES attributes:nil error:&mkErr]) {
+        if (error) *error = mkErr;
+        return NO;
+    }
+
+    // Info.plist: same bundle ID so the TCC grant applies to this CLI tool.
+    NSDictionary *plist = @{
+        @"CFBundleIdentifier":               @"com.accretional.macos-vision",
+        @"CFBundleName":                     @"macos-vision-auth",
+        @"CFBundleExecutable":               @"macos-vision-auth",
+        @"LSUIElement":                      @YES,
+        @"NSSpeechRecognitionUsageDescription":
+            @"macos-vision transcribes audio files using Apple Speech Recognition.",
+    };
+    if (![plist writeToFile:plistPath atomically:YES]) {
+        if (error) {
+            *error = [NSError errorWithDomain:SpeechErrorDomain code:16
+                userInfo:@{NSLocalizedDescriptionKey: @"Failed to write temporary Info.plist."}];
+        }
+        return NO;
+    }
+
+    // Copy this binary into the bundle.
+    NSString *selfPath = [[NSBundle mainBundle] executablePath];
+    if (!selfPath) {
+        // Fallback: read /proc-style path via NSProcessInfo.
+        selfPath = [[NSProcessInfo processInfo] arguments][0];
+    }
+    NSError *copyErr = nil;
+    if (![fm copyItemAtPath:selfPath toPath:binaryDst error:&copyErr]) {
+        if (error) *error = copyErr;
+        return NO;
+    }
+
+    // Make it executable.
+    NSDictionary *attrs = @{NSFilePosixPermissions: @(0755)};
+    [fm setAttributes:attrs ofItemAtPath:binaryDst error:nil];
+
+    // Launch the bundle with `open -W` so that macOS sets the app itself as the
+    // responsible process. The helper binary detects authorize-internal, calls
+    // requestAuthorization:, the TCC dialog appears, and we wait for it to finish.
+    fprintf(stdout, "Opening authorization dialog (a permission prompt should appear)...\n");
+
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = @"/usr/bin/open";
+    task.arguments  = @[@"-W", appPath,
+                        @"--args",
+                        @"speech", @"--operation", @"authorize-internal"];
+    NSError *launchErr = nil;
+    if (![task launchAndReturnError:&launchErr]) {
+        [fm removeItemAtPath:appPath error:nil];
+        if (error) *error = launchErr;
+        return NO;
+    }
+    [task waitUntilExit];
+    [fm removeItemAtPath:appPath error:nil];
+
+    SFSpeechRecognizerAuthorizationStatus after = [SFSpeechRecognizer authorizationStatus];
+    if (after == SFSpeechRecognizerAuthorizationStatusAuthorized) {
+        fprintf(stdout, "Speech recognition authorized successfully.\n");
+        return YES;
+    }
+
+    if (error) {
+        *error = [NSError errorWithDomain:SpeechErrorDomain code:17
+            userInfo:@{NSLocalizedDescriptionKey:
+                @"Authorization was not granted. "
+                 "You can also enable access in System Settings → Privacy & Security → Speech Recognition."}];
+    }
+    return NO;
+}
+
+// Called when the binary is running inside the temporary .app bundle.
+// requestAuthorization: delivers its callback on the main queue, so we need a
+// real NSRunLoop (via NSApplication) for the dialog to appear and the callback
+// to execute.  AppKit is already linked via Cocoa in Package.swift.
+- (BOOL)authorizeInternalWithError:(NSError **)error {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    Class NSAppClass = NSClassFromString(@"NSApplication");
+    id app = [NSAppClass performSelector:NSSelectorFromString(@"sharedApplication")];
+
+    [SFSpeechRecognizer requestAuthorization:^(SFSpeechRecognizerAuthorizationStatus s) {
+        int code = (s == SFSpeechRecognizerAuthorizationStatusAuthorized) ? 0 : 1;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [app performSelector:NSSelectorFromString(@"terminate:") withObject:nil];
+            exit(code);
+        });
+    }];
+
+    // Run the application event loop so the main queue can process callbacks
+    // and TCC can present the authorization dialog.
+    [app performSelector:NSSelectorFromString(@"run")];
+#pragma clang diagnostic pop
+    exit(1);
+}
+
+
 
 - (BOOL)checkAuthorizationWithError:(NSError **)error {
     SFSpeechRecognizerAuthorizationStatus status = [SFSpeechRecognizer authorizationStatus];
-    if (status != SFSpeechRecognizerAuthorizationStatusAuthorized) {
+
+    // On macOS 26+, calling requestAuthorization: from a CLI tool crashes when the
+    // kernel's "responsible process" (e.g. an IDE) lacks NSSpeechRecognitionUsageDescription.
+    // TCC sends SIGKILL before the callback fires — it cannot be caught.
+    // Instead, surface a clear error so the user can pre-authorize via System Settings.
+    if (status == SFSpeechRecognizerAuthorizationStatusNotDetermined) {
         if (error) {
             *error = [NSError errorWithDomain:SpeechErrorDomain code:10
-                                     userInfo:@{NSLocalizedDescriptionKey:
-                                                    @"Speech recognition not authorized — sign the binary with a Developer ID certificate "
-                                                    "to trigger the permission prompt (macOS 26 requires a real cert for requestAuthorization)"}];
+                userInfo:@{NSLocalizedDescriptionKey:
+                    @"Speech recognition has not been authorized yet. "
+                     "Grant access in System Settings → Privacy & Security → Speech Recognition, "
+                     "or run this command once from Terminal.app to trigger the permission dialog."}];
+        }
+        return NO;
+    }
+
+    if (status != SFSpeechRecognizerAuthorizationStatusAuthorized) {
+        NSString *reason;
+        if (status == SFSpeechRecognizerAuthorizationStatusDenied) {
+            reason = @"Speech recognition access was denied. Enable it in System Settings → Privacy & Security → Speech Recognition.";
+        } else if (status == SFSpeechRecognizerAuthorizationStatusRestricted) {
+            reason = @"Speech recognition is restricted on this device (MDM policy).";
+        } else {
+            reason = @"Speech recognition not authorized.";
+        }
+        if (error) {
+            *error = [NSError errorWithDomain:SpeechErrorDomain code:10
+                                     userInfo:@{NSLocalizedDescriptionKey: reason}];
         }
         return NO;
     }

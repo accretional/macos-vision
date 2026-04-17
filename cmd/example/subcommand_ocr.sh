@@ -16,7 +16,7 @@ overlay_ocr() {
     stem=$(basename "$img"); stem="${stem%.*}"
     json="$OUTPUT/${stem}.json"
     if [ ! -f "$json" ]; then
-        echo "  SKIP  overlay ($json not found)"
+        echo "  SKIP  overlay (source json not found)"
         return
     fi
     if [ ! -f "$img" ]; then

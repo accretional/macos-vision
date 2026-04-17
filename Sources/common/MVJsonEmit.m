@@ -69,7 +69,6 @@ BOOL MVEmitEnvelope(NSDictionary *envelope, NSString *jsonOutputPath, NSError **
                                                              error:nil];
         }
         if (![str writeToFile:jsonOutputPath atomically:YES encoding:NSUTF8StringEncoding error:error]) return NO;
-        fprintf(stderr, "Wrote %s\n", jsonOutputPath.UTF8String);
     } else {
         printf("%s\n", str.UTF8String);
     }

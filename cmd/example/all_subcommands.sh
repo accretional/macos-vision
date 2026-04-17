@@ -18,9 +18,12 @@ for script in \
     "$SCRIPT_DIR/subcommand_segment.sh" \
     "$SCRIPT_DIR/subcommand_ocr.sh" \
     "$SCRIPT_DIR/subcommand_track.sh" \
-    "$SCRIPT_DIR/subcommand_audio.sh" \
     "$SCRIPT_DIR/subcommand_nl.sh" \
-    "$SCRIPT_DIR/subcommand_av.sh"
+    "$SCRIPT_DIR/subcommand_av.sh" \
+    "$SCRIPT_DIR/subcommand_coreimage.sh" \
+    "$SCRIPT_DIR/subcommand_sna.sh" \
+    "$SCRIPT_DIR/subcommand_speech.sh" \
+    "$SCRIPT_DIR/subcommand_shazam.sh" 
 do
     subcommand="$(basename "$script" .sh | sed 's/subcommand_//')"
     echo "── $subcommand ──────────────────────────────────────────────────────────────"
