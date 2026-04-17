@@ -6,10 +6,12 @@
 #import "classify/main.h"
 #import "track/main.h"
 #import "overlay/main.h"  // OverlayProcessor
-#import "audio/main.h"
+#import "shazam/main.h"
 #import "capture/main.h"
 #import "nl/main.h"
 #import "av/main.h"
+#import "speech/main.h"
+#import "sna/main.h"
 
 static BOOL MVPathLooksLikeStillImage(NSString *path) {
     if (!path.length) return NO;
@@ -39,10 +41,12 @@ static NSString *MVMainEffectiveOperation(NSString *subcommand, NSString *operat
     if ([subcommand isEqualToString:@"face"]) return @"face-rectangles";
     if ([subcommand isEqualToString:@"classify"]) return @"classify";
     if ([subcommand isEqualToString:@"track"]) return @"homographic";
-    if ([subcommand isEqualToString:@"audio"]) return @"classify";
+    if ([subcommand isEqualToString:@"shazam"]) return @"match";
     if ([subcommand isEqualToString:@"capture"]) return @"screenshot";
     if ([subcommand isEqualToString:@"av"]) return @"inspect";
     if ([subcommand isEqualToString:@"nl"]) return @"detect-language";
+    if ([subcommand isEqualToString:@"speech"]) return @"transcribe";
+    if ([subcommand isEqualToString:@"sna"]) return @"classify";
     return @"default";
 }
 
@@ -63,7 +67,8 @@ static NSString *MVMainJsonInDirectory(NSString *dir, NSString *subcommand, NSSt
         return [dir stringByAppendingPathComponent:[[stem stringByAppendingString:@"_overlay"] stringByAppendingPathExtension:@"json"]];
     }
     if ([subcommand isEqualToString:@"ocr"] || [subcommand isEqualToString:@"debug"] ||
-        [subcommand isEqualToString:@"audio"] || [subcommand isEqualToString:@"nl"]) {
+        [subcommand isEqualToString:@"shazam"] || [subcommand isEqualToString:@"nl"] ||
+        [subcommand isEqualToString:@"speech"] || [subcommand isEqualToString:@"sna"]) {
         return [dir stringByAppendingPathComponent:[MVMainStem(stemPath) stringByAppendingPathExtension:@"json"]];
     }
     NSString *stem = MVMainStem(stemPath);
@@ -127,10 +132,12 @@ static void printUsage(void) {
         "  track     Video or frame-sequence registration / motion (Vision)\n"
         "  overlay   Vision JSON → SVG overlay\n"
         "  debug     Image metadata\n"
-        "  audio     Speech, sound classification, Shazam, pitch, …\n"
+        "  shazam    Song/audio identification (ShazamKit)\n"
         "  capture   Screen, camera, microphone, list devices\n"
         "  nl        NaturalLanguage\n"
         "  av        AVFoundation (inspect, export, waveform, tts, …)\n"
+        "  speech    Speech framework (transcribe, voice-analytics, list-locales)\n"
+        "  sna       SoundAnalysis (classify, classify-custom, list-labels)\n"
         "\n"
         "COMMON OPTIONS:\n"
         "  --input <path>        Primary input: image, video, audio, text file, directory (track / shazam-build)\n"
@@ -145,10 +152,12 @@ static void printUsage(void) {
         "FACE / CLASSIFY / SEGMENT / TRACK: --operation …\n"
         "TRACK optical-flow: requires --artifacts-dir for flow PNGs.\n"
         "OVERLAY: --json (required); --input overrides image; --output = .svg path (optional).\n"
-        "AUDIO: --operation …, --mic, --catalog, --audio-lang, --offline, --topk, windowing flags\n"
+        "SHAZAM: --input; --operation …; --catalog (match-custom / build)\n"
         "CAPTURE: --operation …, --display-index\n"
         "NL: --text, --input (text file), --operation …, --language, --scheme, --unit, --model, …\n"
         "AV: --input; --operation …; --preset; --times; --videos (compose); tts: --text/--input\n"
+        "SPEECH: --input (audio file); --operation …; --audio-lang; --offline; --debug\n"
+        "SNA: --input (audio file); --operation …; --topk; --classify-window; --classify-overlap; --model (classify-custom / list-labels)\n"
     );
 }
 
@@ -324,9 +333,13 @@ int main(int argc, const char * argv[]) {
         NSString *jsonStem = visionIn;
         if ([subcommand isEqualToString:@"track"]) {
             jsonStem = inputPath ?: @"";
-        } else if ([subcommand isEqualToString:@"audio"]) {
+        } else if ([subcommand isEqualToString:@"shazam"]) {
             jsonStem = inputPath ?: @"";
         } else if ([subcommand isEqualToString:@"nl"]) {
+            jsonStem = inputPath ?: @"";
+        } else if ([subcommand isEqualToString:@"speech"]) {
+            jsonStem = inputPath ?: @"";
+        } else if ([subcommand isEqualToString:@"sna"]) {
             jsonStem = inputPath ?: @"";
         } else if ([subcommand isEqualToString:@"overlay"]) {
             jsonStem = jsonPath.length ? jsonPath : @"";
@@ -395,23 +408,14 @@ int main(int argc, const char * argv[]) {
             processor.jsonOutput   = jsonOutputPath.length ? jsonOutputPath : jsonOutResolved;
             success = [processor runWithError:&error];
 
-        } else if ([subcommand isEqualToString:@"audio"]) {
-            AudioProcessor *processor = [[AudioProcessor alloc] init];
+        } else if ([subcommand isEqualToString:@"shazam"]) {
+            ShazamProcessor *processor = [[ShazamProcessor alloc] init];
             processor.inputPath    = inputPath;
             processor.jsonOutput   = jsonOutResolved;
             processor.artifactsDir = artifactsDir.length ? artifactsDir : artResolved;
-            processor.operation    = operation ?: @"classify";
-            processor.lang         = audioLang;
-            processor.offline      = offline;
-            processor.topk         = topk;
-            processor.debug        = debug;
-            processor.mic          = mic;
+            processor.operation    = operation ?: @"match";
             processor.catalog      = catalog;
-            processor.classifyWindowDurationSet = classifyWindowSet;
-            processor.classifyWindowDuration    = classifyWindow;
-            processor.classifyOverlapFactorSet  = classifyOverlapSet;
-            processor.classifyOverlapFactor     = classifyOverlap;
-            processor.pitchHopFrames            = pitchHopFrames;
+            processor.debug        = debug;
             success = [processor runWithError:&error];
 
         } else if ([subcommand isEqualToString:@"capture"]) {
@@ -470,14 +474,39 @@ int main(int argc, const char * argv[]) {
             processor.timeRangeStr = avTimeRange;
             processor.metaKey      = avMetaKey;
             processor.videosStr    = avVideos;
-            processor.text         = nlText;
-            processor.inputFile    = inputPath;
-            processor.voice        = avVoice;
-            processor.debug        = debug;
+            processor.text          = nlText;
+            processor.inputFile     = inputPath;
+            processor.voice         = avVoice;
+            processor.pitchHopFrames = pitchHopFrames;
+            processor.debug         = debug;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"speech"]) {
+            SpeechProcessor *processor = [[SpeechProcessor alloc] init];
+            processor.inputPath  = inputPath;
+            processor.jsonOutput = jsonOutResolved;
+            processor.operation  = operation ?: @"transcribe";
+            processor.lang       = audioLang;
+            processor.offline    = offline;
+            processor.debug      = debug;
+            success = [processor runWithError:&error];
+
+        } else if ([subcommand isEqualToString:@"sna"]) {
+            SNAProcessor *processor = [[SNAProcessor alloc] init];
+            processor.inputPath        = inputPath;
+            processor.jsonOutput       = jsonOutResolved;
+            processor.operation        = operation ?: @"classify";
+            processor.modelPath        = nlModelPath;
+            processor.topk             = topk;
+            processor.windowDuration   = classifyWindow;
+            processor.windowDurationSet = classifyWindowSet;
+            processor.overlapFactor    = classifyOverlap;
+            processor.overlapFactorSet = classifyOverlapSet;
+            processor.debug            = debug;
             success = [processor runWithError:&error];
 
         } else {
-            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, overlay (svg), debug, audio, capture, nl, av\n",
+            fprintf(stderr, "Error: unknown subcommand '%s'. Available: ocr, face, classify, segment, track, overlay (svg), debug, shazam, capture, nl, av, speech, sna\n",
                     subcommand.UTF8String);
             return 1;
         }

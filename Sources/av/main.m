@@ -210,7 +210,7 @@ static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
 
 - (BOOL)runWithError:(NSError **)error {
     NSArray *valid = @[@"inspect", @"tracks", @"metadata", @"thumbnail", @"export", @"export-audio",
-                       @"list-presets", @"compose", @"waveform", @"tts"];
+                       @"list-presets", @"compose", @"waveform", @"tts", @"noise", @"pitch", @"isolate"];
     if (![valid containsObject:self.operation]) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:1
                              userInfo:@{NSLocalizedDescriptionKey:
@@ -265,6 +265,15 @@ static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
     }
     if ([self.operation isEqualToString:@"waveform"]) {
         return [self runWaveform:asset error:error];
+    }
+    if ([self.operation isEqualToString:@"noise"]) {
+        return [self runNoise:asset error:error];
+    }
+    if ([self.operation isEqualToString:@"pitch"]) {
+        return [self runPitch:asset error:error];
+    }
+    if ([self.operation isEqualToString:@"isolate"]) {
+        return [self runIsolate:asset error:error];
     }
 
     return YES;
@@ -833,6 +842,304 @@ static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
     return [self emit:out error:error];
 }
 
+// ── noise (RMS over 100 ms windows, AVAssetReader, works for video+audio) ─────
+
+- (BOOL)runNoise:(AVURLAsset *)asset error:(NSError **)error {
+    NSDate *t0 = self.debug ? [NSDate date] : nil;
+    MWaitAssetKeys(asset, @[@"tracks"]);
+
+    NSArray<AVAssetTrack *> *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+    if (audioTracks.count == 0) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorNoAudioTrack
+                             userInfo:@{NSLocalizedDescriptionKey: @"No audio tracks found in asset"}];
+        return NO;
+    }
+
+    AVAssetTrack *track = audioTracks.firstObject;
+    NSUInteger channelCount = 1;
+    double sampleRate = 44100.0;
+    if (track.formatDescriptions.count > 0) {
+        CMFormatDescriptionRef fmt = (__bridge CMFormatDescriptionRef)track.formatDescriptions.firstObject;
+        const AudioStreamBasicDescription *asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt);
+        if (asbd) { channelCount = (NSUInteger)asbd->mChannelsPerFrame; sampleRate = asbd->mSampleRate; }
+    }
+
+    NSError *readerErr = nil;
+    AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&readerErr];
+    if (!reader) { if (error) *error = readerErr; return NO; }
+
+    NSDictionary *outputSettings = @{
+        AVFormatIDKey: @(kAudioFormatLinearPCM),
+        AVLinearPCMBitDepthKey: @32,
+        AVLinearPCMIsFloatKey: @YES,
+        AVLinearPCMIsBigEndianKey: @NO,
+        AVLinearPCMIsNonInterleaved: @NO,
+    };
+    AVAssetReaderTrackOutput *trackOutput =
+        [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outputSettings];
+    [reader addOutput:trackOutput];
+    if (![reader startReading]) { if (error) *error = reader.error; return NO; }
+
+    NSMutableData *rawData = [NSMutableData data];
+    while (reader.status == AVAssetReaderStatusReading) {
+        CMSampleBufferRef sampleBuf = [trackOutput copyNextSampleBuffer];
+        if (!sampleBuf) break;
+        CMBlockBufferRef block = CMSampleBufferGetDataBuffer(sampleBuf);
+        if (block) {
+            size_t len = CMBlockBufferGetDataLength(block);
+            NSMutableData *chunk = [NSMutableData dataWithLength:len];
+            CMBlockBufferCopyDataBytes(block, 0, len, chunk.mutableBytes);
+            [rawData appendData:chunk];
+        }
+        CFRelease(sampleBuf);
+    }
+    if (reader.status == AVAssetReaderStatusFailed) { if (error) *error = reader.error; return NO; }
+
+    NSUInteger totalFrames = rawData.length / (sizeof(float) * channelCount);
+    NSInteger win = (NSInteger)(sampleRate * 0.1);  // 100 ms window
+    float *samples = (float *)rawData.bytes;
+    NSMutableArray *out = [NSMutableArray array];
+
+    for (NSUInteger s = 0; s < totalFrames; s += (NSUInteger)MAX(1, win)) {
+        NSUInteger e = MIN(s + (NSUInteger)MAX(1, win), totalFrames);
+        NSUInteger n = e - s;
+        float ssq = 0.0f;
+        for (NSUInteger f = s; f < e; f++) {
+            for (NSUInteger c = 0; c < channelCount; c++) {
+                float v = samples[f * channelCount + c];
+                ssq += v * v;
+            }
+        }
+        float rms = sqrtf(ssq / (float)(n * channelCount));
+        float db  = 20.0f * log10f(MAX(rms, 1e-5f));
+        NSString *level = (db > -20) ? @"loud" : (db > -40) ? @"moderate" : @"quiet";
+        [out addObject:@{
+            @"time":  @(round((double)s / sampleRate * 100.0) / 100.0),
+            @"rms":   @(round(rms * 10000.0) / 10000.0),
+            @"db":    @(round(db  * 10.0) / 10.0),
+            @"level": level,
+        }];
+    }
+
+    NSMutableDictionary *result = [@{
+        @"operation":     @"noise",
+        @"path":          MVRelativePath(asset.URL.path),
+        @"windows":       out,
+        @"sample_rate":   @(sampleRate),
+        @"channel_count": @(channelCount),
+        @"window_s":      @(0.1),
+    } mutableCopy];
+    if (t0) result[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    return [self emit:result error:error];
+}
+
+// ── pitch (autocorrelation, AVAssetReader, works for video+audio) ─────────────
+
+static NSString *MAVFrequencyToNote(float freq) {
+    NSArray *notes = @[@"C",@"C#",@"D",@"D#",@"E",@"F",@"F#",@"G",@"G#",@"A",@"A#",@"B"];
+    float semitones = 12.0f * log2f(freq / 440.0f);
+    NSInteger idx   = ((NSInteger)roundf(semitones) % 12 + 12) % 12;
+    NSInteger oct   = 4 + (NSInteger)roundf(semitones) / 12;
+    return [NSString stringWithFormat:@"%@%ld", notes[idx], (long)oct];
+}
+
+- (BOOL)runPitch:(AVURLAsset *)asset error:(NSError **)error {
+    NSDate *t0 = self.debug ? [NSDate date] : nil;
+    MWaitAssetKeys(asset, @[@"tracks"]);
+
+    NSArray<AVAssetTrack *> *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+    if (audioTracks.count == 0) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorNoAudioTrack
+                             userInfo:@{NSLocalizedDescriptionKey: @"No audio tracks found in asset"}];
+        return NO;
+    }
+
+    AVAssetTrack *track = audioTracks.firstObject;
+    NSUInteger channelCount = 1;
+    double sampleRate = 44100.0;
+    if (track.formatDescriptions.count > 0) {
+        CMFormatDescriptionRef fmt = (__bridge CMFormatDescriptionRef)track.formatDescriptions.firstObject;
+        const AudioStreamBasicDescription *asbd = CMAudioFormatDescriptionGetStreamBasicDescription(fmt);
+        if (asbd) { channelCount = (NSUInteger)asbd->mChannelsPerFrame; sampleRate = asbd->mSampleRate; }
+    }
+
+    NSError *readerErr = nil;
+    AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&readerErr];
+    if (!reader) { if (error) *error = readerErr; return NO; }
+
+    NSDictionary *outputSettings = @{
+        AVFormatIDKey: @(kAudioFormatLinearPCM),
+        AVLinearPCMBitDepthKey: @32,
+        AVLinearPCMIsFloatKey: @YES,
+        AVLinearPCMIsBigEndianKey: @NO,
+        AVLinearPCMIsNonInterleaved: @NO,
+    };
+    AVAssetReaderTrackOutput *trackOutput =
+        [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:outputSettings];
+    [reader addOutput:trackOutput];
+    if (![reader startReading]) { if (error) *error = reader.error; return NO; }
+
+    NSMutableData *rawData = [NSMutableData data];
+    while (reader.status == AVAssetReaderStatusReading) {
+        CMSampleBufferRef sampleBuf = [trackOutput copyNextSampleBuffer];
+        if (!sampleBuf) break;
+        CMBlockBufferRef block = CMSampleBufferGetDataBuffer(sampleBuf);
+        if (block) {
+            size_t len = CMBlockBufferGetDataLength(block);
+            NSMutableData *chunk = [NSMutableData dataWithLength:len];
+            CMBlockBufferCopyDataBytes(block, 0, len, chunk.mutableBytes);
+            [rawData appendData:chunk];
+        }
+        CFRelease(sampleBuf);
+    }
+    if (reader.status == AVAssetReaderStatusFailed) { if (error) *error = reader.error; return NO; }
+
+    NSUInteger totalFrames = rawData.length / (sizeof(float) * channelCount);
+    float *samples = (float *)rawData.bytes;
+
+    NSInteger hop = self.pitchHopFrames > 0 ? self.pitchHopFrames : 512;
+    if (hop < 32) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorReaderFailed
+                             userInfo:@{NSLocalizedDescriptionKey: @"--pitch-hop must be at least 32 audio frames"}];
+        return NO;
+    }
+    if (hop > 1048576) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorReaderFailed
+                             userInfo:@{NSLocalizedDescriptionKey: @"--pitch-hop is unreasonably large"}];
+        return NO;
+    }
+
+    NSInteger win    = 2048;
+    NSMutableArray *pitches = [NSMutableArray array];
+
+    for (NSInteger s = 0; s + win < (NSInteger)totalFrames; s += hop) {
+        float maxCorr = 0.0f;
+        NSInteger bestLag = 0;
+        NSInteger lagMax = MIN(1000, win / 2);
+        for (NSInteger lag = 50; lag < lagMax; lag++) {
+            float corr = 0.0f;
+            // Use only channel 0 (index 0 of each frame) for pitch
+            for (NSInteger i = 0; i < win - lag; i++) {
+                float a = samples[(s + i) * (NSInteger)channelCount];
+                float b = samples[(s + i + lag) * (NSInteger)channelCount];
+                corr += a * b;
+            }
+            if (corr > maxCorr) { maxCorr = corr; bestLag = lag; }
+        }
+        if (bestLag > 0 && maxCorr > 0.1f) {
+            float freq = (float)sampleRate / (float)bestLag;
+            if (freq >= 50.0f && freq <= 2000.0f) {
+                [pitches addObject:@{
+                    @"time":       @(round((double)s / sampleRate * 100.0) / 100.0),
+                    @"frequency":  @(round(freq * 10.0) / 10.0),
+                    @"note":       MAVFrequencyToNote(freq),
+                    @"confidence": @(round(maxCorr * 100.0) / 100.0),
+                }];
+            }
+        }
+    }
+
+    NSMutableDictionary *result = [@{
+        @"operation":     @"pitch",
+        @"path":          MVRelativePath(asset.URL.path),
+        @"frames":        pitches,
+        @"sample_rate":   @(sampleRate),
+        @"channel_count": @(channelCount),
+        @"hop_frames":    @(hop),
+    } mutableCopy];
+    if (t0) result[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    return [self emit:result error:error];
+}
+
+// ── isolate (high-pass filter via AVAudioEngine manual rendering) ─────────────
+
+- (BOOL)runIsolate:(AVURLAsset *)asset error:(NSError **)error {
+    NSDate *t0 = self.debug ? [NSDate date] : nil;
+    MWaitAssetKeys(asset, @[@"tracks"]);
+
+    // Pre-check: ensure there's an audio track (gives clear error for video-only files)
+    NSArray<AVAssetTrack *> *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
+    if (audioTracks.count == 0) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorNoAudioTrack
+                             userInfo:@{NSLocalizedDescriptionKey: @"No audio tracks found — cannot isolate"}];
+        return NO;
+    }
+
+    // Determine output path
+    NSString *srcBase = asset.URL.lastPathComponent.stringByDeletingPathExtension ?: @"audio";
+    NSString *outName = [NSString stringWithFormat:@"isolated_%@.m4a", srcBase];
+    NSURL *outURL;
+    if (self.output.length) {
+        outURL = [NSURL fileURLWithPath:self.output];
+    } else if (self.artifactsDir.length) {
+        outURL = [[NSURL fileURLWithPath:self.artifactsDir] URLByAppendingPathComponent:outName];
+    } else {
+        outURL = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:outName]];
+    }
+    [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
+                             withIntermediateDirectories:YES attributes:nil error:nil];
+
+    // AVAudioFile can read audio from many container formats (mp4, mov, aiff, wav, m4a, …)
+    NSError *afErr = nil;
+    AVAudioFile *audioFile = [[AVAudioFile alloc] initForReading:asset.URL error:&afErr];
+    if (!audioFile) { if (error) *error = afErr; return NO; }
+
+    AVAudioEngine    *engine = [[AVAudioEngine alloc] init];
+    AVAudioPlayerNode *player = [[AVAudioPlayerNode alloc] init];
+    AVAudioUnitEQ    *eq     = [[AVAudioUnitEQ alloc] initWithNumberOfBands:1];
+    eq.bands[0].filterType = AVAudioUnitEQFilterTypeHighPass;
+    eq.bands[0].frequency  = 150.0f;
+    eq.bands[0].bypass     = NO;
+
+    [engine attachNode:player];
+    [engine attachNode:eq];
+    [engine connect:player to:eq format:audioFile.processingFormat];
+    [engine connect:eq to:engine.mainMixerNode format:audioFile.processingFormat];
+
+    NSError *engErr = nil;
+    if (![engine enableManualRenderingMode:AVAudioEngineManualRenderingModeOffline
+                                    format:audioFile.processingFormat
+                         maximumFrameCount:4096
+                                     error:&engErr]) {
+        if (error) *error = engErr; return NO;
+    }
+    NSError *startErr = nil;
+    if (![engine startAndReturnError:&startErr]) { if (error) *error = startErr; return NO; }
+    [player scheduleFile:audioFile atTime:nil completionHandler:nil];
+    [player play];
+
+    AVAudioFile *outFile = [[AVAudioFile alloc] initForWriting:outURL
+                                                      settings:audioFile.fileFormat.settings
+                                                         error:error];
+    if (!outFile) { [engine stop]; return NO; }
+
+    AVAudioPCMBuffer *renderBuf =
+        [[AVAudioPCMBuffer alloc] initWithPCMFormat:engine.manualRenderingFormat frameCapacity:4096];
+
+    while (engine.manualRenderingSampleTime < audioFile.length) {
+        AVAudioFrameCount toRender =
+            (AVAudioFrameCount)MIN(4096LL, audioFile.length - engine.manualRenderingSampleTime);
+        NSError *renderErr = nil;
+        AVAudioEngineManualRenderingStatus status =
+            [engine renderOffline:toRender toBuffer:renderBuf error:&renderErr];
+        if (status == AVAudioEngineManualRenderingStatusError) { if (error) *error = renderErr; break; }
+        if (renderBuf.frameLength > 0) { [outFile writeFromBuffer:renderBuf error:nil]; }
+        if (status == AVAudioEngineManualRenderingStatusInsufficientDataFromInputNode) break;
+    }
+    [player stop];
+    [engine stop];
+
+    NSMutableDictionary *result = [@{
+        @"operation": @"isolate",
+        @"input":     MVRelativePath(asset.URL.path),
+        @"output":    MVRelativePath(outURL.path),
+        @"method":    @"high-pass filter (150Hz)",
+        @"note":      @"macOS 15+ voiceProcessing API available for better isolation",
+    } mutableCopy];
+    if (t0) result[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    return [self emit:result error:error];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 - (BOOL)emit:(NSDictionary *)obj error:(NSError **)error {
@@ -843,7 +1150,8 @@ static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
     BOOL isExport = [self.operation isEqualToString:@"export"] ||
                     [self.operation isEqualToString:@"export-audio"] ||
                     [self.operation isEqualToString:@"compose"] ||
-                    [self.operation isEqualToString:@"tts"];
+                    [self.operation isEqualToString:@"tts"] ||
+                    [self.operation isEqualToString:@"isolate"];
     if (isExport && self.output) {
         NSString *jsonPath = [[self.output stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
         return MVEmitEnvelope(env, jsonPath, error);

@@ -1,0 +1,29 @@
+#import <Foundation/Foundation.h>
+
+NS_ASSUME_NONNULL_BEGIN
+
+@interface SNAProcessor : NSObject
+
+/// Audio file path (required for classify and classify-custom; omit for list-labels).
+@property (nonatomic, copy, nullable) NSString *inputPath;
+/// JSON envelope output path, or stdout when omitted.
+@property (nonatomic, copy, nullable) NSString *jsonOutput;
+/// Operation: classify | classify-custom | detect | list-labels
+@property (nonatomic, copy) NSString *operation;
+/// Path to a CoreML audio classification model (required for classify-custom; optional for list-labels).
+@property (nonatomic, copy, nullable) NSString *modelPath;
+/// Top-K results per classification window (default 5).
+@property (nonatomic, assign) NSInteger topk;
+/// Override analysis window duration in seconds (macOS 12+; 0 = use model default).
+@property (nonatomic, assign) NSTimeInterval windowDuration;
+@property (nonatomic, assign) BOOL windowDurationSet;
+/// Overlap factor between consecutive analysis windows, [0.0, 1.0) (default: model default).
+@property (nonatomic, assign) double overlapFactor;
+@property (nonatomic, assign) BOOL overlapFactorSet;
+@property (nonatomic, assign) BOOL debug;
+
+- (BOOL)runWithError:(NSError **)error;
+
+@end
+
+NS_ASSUME_NONNULL_END

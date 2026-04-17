@@ -18,6 +18,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *text;        // inline text for tts
 @property (nonatomic, copy, nullable) NSString *voice;       // voice identifier for tts
 @property (nonatomic, copy, nullable) NSString *inputFile;   // --input file for tts
+@property (nonatomic, assign) NSInteger pitchHopFrames;      // --pitch-hop for pitch operation
 @property (nonatomic, assign) BOOL debug;
 
 - (BOOL)runWithError:(NSError **)error;
