@@ -5,9 +5,12 @@ set -euo pipefail
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$TESTS_DIR/.." && pwd)"
 
-echo "Building..."
-swift build --package-path "$ROOT" 2>&1 | tail -1
-echo
+# Allow callers (e.g. test.sh) that already ran build.sh to skip a redundant compile.
+if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
+  echo "Building..."
+  swift build --package-path "$ROOT" 2>&1 | tail -1
+  echo
+fi
 
 PASS=0; FAIL=0
 
