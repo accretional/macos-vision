@@ -416,17 +416,24 @@ static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
         [times addObject:[NSValue valueWithCMTime:CMTimeMakeWithSeconds(sec, 600)]];
     }
 
-    NSURL *destDir;
-    if (self.artifactsDir.length) {
-        destDir = [NSURL fileURLWithPath:self.artifactsDir];
-    } else if (self.output.length) {
-        destDir = [[NSURL fileURLWithPath:self.output] URLByDeletingLastPathComponent];
-    } else {
-        destDir = [NSURL fileURLWithPath:[[NSFileManager defaultManager] currentDirectoryPath]];
-    }
-    [[NSFileManager defaultManager] createDirectoryAtURL:destDir withIntermediateDirectories:YES attributes:nil error:nil];
+    BOOL isMulti = self.timesStr.length > 0;
 
-    NSString *base = asset.URL.lastPathComponent.stringByDeletingPathExtension ?: @"thumb";
+    // For single thumbnail with --output, use that exact path; otherwise derive a directory.
+    NSURL *singleOutURL = nil;
+    NSURL *destDir = nil;
+    if (!isMulti && self.output.length) {
+        singleOutURL = [NSURL fileURLWithPath:self.output];
+        [[NSFileManager defaultManager] createDirectoryAtURL:singleOutURL.URLByDeletingLastPathComponent
+                                 withIntermediateDirectories:YES attributes:nil error:nil];
+    } else {
+        if (self.artifactsDir.length) {
+            destDir = [NSURL fileURLWithPath:self.artifactsDir];
+        } else {
+            destDir = [NSURL fileURLWithPath:[[NSFileManager defaultManager] currentDirectoryPath]];
+        }
+        [[NSFileManager defaultManager] createDirectoryAtURL:destDir withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+
     NSMutableArray *written = [NSMutableArray array];
 
     NSInteger idx = 0;
@@ -441,11 +448,21 @@ static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
         }
         NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:cg];
         CGImageRelease(cg);
-        NSString *name = [NSString stringWithFormat:@"%@_%ld.png", base, (long)idx++];
-        NSURL *pngURL = [destDir URLByAppendingPathComponent:name];
+
+        NSURL *pngURL;
+        if (singleOutURL) {
+            pngURL = singleOutURL;
+        } else if (isMulti) {
+            NSString *name = [NSString stringWithFormat:@"av_thumbnail_%03ld.png", (long)(idx + 1)];
+            pngURL = [destDir URLByAppendingPathComponent:name];
+        } else {
+            pngURL = [destDir URLByAppendingPathComponent:@"av_thumbnail.png"];
+        }
+
         NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
         if (![png writeToURL:pngURL options:NSDataWritingAtomic error:error]) return NO;
         [written addObject:@{ @"timeSeconds": @(CMTimeGetSeconds(t)), @"path": MVRelativePath(pngURL.path) }];
+        idx++;
     }
 
     NSMutableDictionary *out = [@{ @"operation": @"thumbnail", @"thumbnails": written } mutableCopy];
@@ -461,17 +478,21 @@ static BOOL MTTSExportWAVToM4A(NSURL *wavURL, NSURL *m4aURL, NSError **error) {
                              userInfo:@{NSLocalizedDescriptionKey: @"Could not load image"}];
         return NO;
     }
-    NSURL *destDir;
-    if (self.artifactsDir.length) {
-        destDir = [NSURL fileURLWithPath:self.artifactsDir];
-    } else if (self.output.length) {
-        destDir = [[NSURL fileURLWithPath:self.output] URLByDeletingLastPathComponent];
+
+    NSURL *outURL;
+    if (self.output.length) {
+        outURL = [NSURL fileURLWithPath:self.output];
     } else {
-        destDir = [NSURL fileURLWithPath:[[NSFileManager defaultManager] currentDirectoryPath]];
+        NSURL *destDir;
+        if (self.artifactsDir.length) {
+            destDir = [NSURL fileURLWithPath:self.artifactsDir];
+        } else {
+            destDir = [NSURL fileURLWithPath:[[NSFileManager defaultManager] currentDirectoryPath]];
+        }
+        outURL = [destDir URLByAppendingPathComponent:@"av_thumbnail.png"];
     }
-    [[NSFileManager defaultManager] createDirectoryAtURL:destDir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *name = [[imgURL.lastPathComponent stringByDeletingPathExtension] stringByAppendingString:@"_thumb.png"];
-    NSURL *outURL = self.output ? [NSURL fileURLWithPath:self.output] : [destDir URLByAppendingPathComponent:name];
+    [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
+                             withIntermediateDirectories:YES attributes:nil error:nil];
 
     CGImageRef cg = [img CGImageForProposedRect:NULL context:nil hints:nil];
     if (!cg) {

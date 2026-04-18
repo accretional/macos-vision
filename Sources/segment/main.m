@@ -102,7 +102,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
             return NO;
         }
 
-        NSString *outPath = [self outputPathForBase:base suffix:@"foreground" inputPath:imagePath];
+        NSString *outPath = [self singleOutputPathForOperation:@"foreground-mask"];
         BOOL ok = [self savePixelBuffer:pixelBuffer toPath:outPath error:error];
         CVPixelBufferRelease(pixelBuffer);
         if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"foreground_mask")];
@@ -153,8 +153,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
                 *stop = YES;
                 return;
             }
-            NSString *suffix = [NSString stringWithFormat:@"person_%lu", (unsigned long)idx];
-            NSString *outPath = [self outputPathForBase:base suffix:suffix inputPath:imagePath];
+            NSString *outPath = [self multiOutputPathForPersonMaskIndex:idx];
             NSError *saveError = nil;
             if ([self savePixelBuffer:pb toPath:outPath error:&saveError]) {
                 [artifactPaths addObject:MVArtifactEntry(outPath, @"person_mask")];
@@ -217,7 +216,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
         [blend setValue:mask      forKey:kCIInputMaskImageKey];
 
         CIImage *result = blend.outputImage;
-        NSString *outPath = [self outputPathForBase:base suffix:@"person_segment" inputPath:imagePath];
+        NSString *outPath = [self singleOutputPathForOperation:@"person-segment"];
         BOOL ok = [self saveCIImage:result toPath:outPath error:error];
         if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"person_segment")];
         return ok;
@@ -250,7 +249,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
     }
 
     CIImage *heatmap = [CIImage imageWithCVPixelBuffer:obs.pixelBuffer];
-    NSString *outPath = [self outputPathForBase:base suffix:@"attention_saliency" inputPath:imagePath];
+    NSString *outPath = [self singleOutputPathForOperation:@"attention-saliency"];
     BOOL ok = [self saveCIImage:heatmap toPath:outPath error:error];
     if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"attention_saliency")];
     return ok;
@@ -278,7 +277,7 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
     }
 
     CIImage *heatmap = [CIImage imageWithCVPixelBuffer:obs.pixelBuffer];
-    NSString *outPath = [self outputPathForBase:base suffix:@"objectness_saliency" inputPath:imagePath];
+    NSString *outPath = [self singleOutputPathForOperation:@"objectness-saliency"];
     BOOL ok = [self saveCIImage:heatmap toPath:outPath error:error];
     if (ok) [artifactPaths addObject:MVArtifactEntry(outPath, @"objectness_saliency")];
     return ok;
@@ -326,12 +325,25 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
     return [pngData writeToFile:path options:NSDataWritingAtomic error:error];
 }
 
-- (NSString *)outputPathForBase:(NSString *)base suffix:(NSString *)suffix inputPath:(NSString *)inputPath {
-    NSString *filename = [NSString stringWithFormat:@"%@_%@.png", base, suffix];
-    if (self.artifactsDir.length) {
-        return [self.artifactsDir stringByAppendingPathComponent:filename];
-    }
-    return [[inputPath stringByDeletingLastPathComponent] stringByAppendingPathComponent:filename];
+/// Single-file output path: --output exact > artifactsDir/segment_<op>.png > CWD/segment_<op>.png
+- (NSString *)singleOutputPathForOperation:(NSString *)op {
+    if (self.outputPath.length) return self.outputPath;
+    NSString *safeOp = [op stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+    NSString *filename = [NSString stringWithFormat:@"segment_%@.png", safeOp];
+    NSString *dir = self.artifactsDir.length
+        ? self.artifactsDir
+        : [[NSFileManager defaultManager] currentDirectoryPath];
+    return [dir stringByAppendingPathComponent:filename];
+}
+
+/// Multi-file output path (person-mask): artifactsDir/segment_person_mask_NNN.png or CWD/...
+/// No --output flag for multi-file operations.
+- (NSString *)multiOutputPathForPersonMaskIndex:(NSUInteger)idx {
+    NSString *filename = [NSString stringWithFormat:@"segment_person_mask_%03lu.png", (unsigned long)(idx + 1)];
+    NSString *dir = self.artifactsDir.length
+        ? self.artifactsDir
+        : [[NSFileManager defaultManager] currentDirectoryPath];
+    return [dir stringByAppendingPathComponent:filename];
 }
 
 @end
