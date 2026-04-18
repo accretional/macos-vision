@@ -47,7 +47,7 @@ typedef NS_ENUM(NSInteger, DebugErrorCode) {
     CGImageRef cgImage = [image CGImageForProposedRect:nil context:nil hints:nil];
     return @{
         @"filename": [imagePath lastPathComponent],
-        @"filepath": absolutePath,
+        @"filepath": MVRelativePath(absolutePath),
         @"width":    @(CGImageGetWidth(cgImage)),
         @"height":   @(CGImageGetHeight(cgImage)),
         @"filesize": attrs[NSFileSize],

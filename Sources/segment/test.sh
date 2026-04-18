@@ -16,7 +16,7 @@ if [ ! -f "$img" ]; then fail "sad_pablo.png not found"; echo "0 passed, 1 faile
 # ── foreground-mask ───────────────────────────────────────────────────────────
 echo "── segment: foreground-mask ─────────────────────────────────────────────────"
 "$BINARY" segment --input "$img" --operation foreground-mask --output "$TMP"
-got="$TMP/sad_pablo_foreground.png"
+got="$TMP/segment_foreground_mask.png"
 if [ -f "$got" ]; then
     pass "foreground-mask: output produced"
 
