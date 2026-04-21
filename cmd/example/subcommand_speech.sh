@@ -18,7 +18,7 @@ if ! say -o "$SYNTH" "The quick brown fox jumps over the lazy dog. Speech recogn
     exit 0
 fi
 
-speech_audio="$EXAMPLE_AUDIO_SPEECH"
+speech_audio="$SPEECH_TRANSCRIBE_INPUT"
 [ -f "$speech_audio" ] || speech_audio="$SYNTH"
 
 filename_base() { basename "$1" | sed 's/\.[^.]*$//'; }

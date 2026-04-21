@@ -32,8 +32,8 @@ run_file() {
 
 filename_base() { basename "$1" | sed 's/\.[^.]*$//'; }
 
-sounds_audio="$EXAMPLE_AUDIO_SOUNDS"
-speech_audio="$EXAMPLE_AUDIO_SPEECH"
+sounds_audio="$SNA_CLASSIFY_SOUNDS_INPUT"
+speech_audio="$SNA_CLASSIFY_SPEECH_INPUT"
 [ -f "$speech_audio" ] || speech_audio="$SYNTH"
 
 SPEECH_BASE="$(filename_base "$speech_audio")"

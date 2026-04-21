@@ -30,27 +30,27 @@ run_vid() {
 }
 
 # ── homographic ───────────────────────────────────────────────────────────────
-run_seq "homographic" "$EXAMPLE_TRACK_FRAMES" \
-    "$BINARY" track --input "$EXAMPLE_TRACK_FRAMES" \
+run_seq "homographic" "$TRACK_HOMOGRAPHIC_DIR" \
+    "$BINARY" track --input "$TRACK_HOMOGRAPHIC_DIR" \
                     --operation homographic \
                     --output "$OUTPUT"
 
 # ── translational ─────────────────────────────────────────────────────────────
-run_seq "translational" "$EXAMPLE_TRACK_FRAMES" \
-    "$BINARY" track --input "$EXAMPLE_TRACK_FRAMES" \
+run_seq "translational" "$TRACK_TRANSLATIONAL_DIR" \
+    "$BINARY" track --input "$TRACK_TRANSLATIONAL_DIR" \
                     --operation translational \
                     --output "$OUTPUT"
 
 # ── optical-flow ──────────────────────────────────────────────────────────────
-run_seq "optical-flow" "$EXAMPLE_TRACK_FRAMES" \
-    "$BINARY" track --input "$EXAMPLE_TRACK_FRAMES" \
+run_seq "optical-flow" "$TRACK_OPTICAL_FLOW_DIR" \
+    "$BINARY" track --input "$TRACK_OPTICAL_FLOW_DIR" \
                     --operation optical-flow \
                     --artifacts-dir "$OUTPUT/optical-flow" \
                     --output "$OUTPUT"
 
 # ── trajectories (video) ──────────────────────────────────────────────────────
-run_vid "trajectories-video" "$EXAMPLE_TRACK_VIDEO" \
-    "$BINARY" track --input "$EXAMPLE_TRACK_VIDEO" \
+run_vid "trajectories-video" "$TRACK_TRAJECTORIES_INPUT" \
+    "$BINARY" track --input "$TRACK_TRAJECTORIES_INPUT" \
                     --operation trajectories \
                     --output "$OUTPUT"
 

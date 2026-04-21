@@ -39,45 +39,45 @@ run() {
 }
 
 # ── classify (no SVG — image-level labels only, no spatial data) ──────────────
-run "classify" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
+run "classify" "$CLASSIFY_CLASSIFY_INPUT" \
+    "$BINARY" classify --input "$CLASSIFY_CLASSIFY_INPUT" \
                        --operation classify \
                        --output "$OUTPUT"
 
 # ── animals ───────────────────────────────────────────────────────────────────
-run "animals" "$EXAMPLE_IMG_CAT_SIDE_EYE" \
-    "$BINARY" classify --input "$EXAMPLE_IMG_CAT_SIDE_EYE" \
+run "animals" "$CLASSIFY_ANIMALS_INPUT" \
+    "$BINARY" classify --input "$CLASSIFY_ANIMALS_INPUT" \
                        --operation animals \
                        --output "$OUTPUT"
-overlay_classify "$EXAMPLE_IMG_CAT_SIDE_EYE" animals
+overlay_classify "$CLASSIFY_ANIMALS_INPUT" animals
 
 # ── rectangles ────────────────────────────────────────────────────────────────
-run "rectangles" "$EXAMPLE_IMG_DOCUMENT" \
-    "$BINARY" classify --input "$EXAMPLE_IMG_DOCUMENT" \
+run "rectangles" "$CLASSIFY_RECTANGLES_INPUT" \
+    "$BINARY" classify --input "$CLASSIFY_RECTANGLES_INPUT" \
                        --operation rectangles \
                        --output "$OUTPUT"
-overlay_classify "$EXAMPLE_IMG_DOCUMENT" rectangles
+overlay_classify "$CLASSIFY_RECTANGLES_INPUT" rectangles
 
 # ── horizon ───────────────────────────────────────────────────────────────────
-run "horizon" "$EXAMPLE_IMG_SAD_PABLO" \
-    "$BINARY" classify --input "$EXAMPLE_IMG_SAD_PABLO" \
+run "horizon" "$CLASSIFY_HORIZON_INPUT" \
+    "$BINARY" classify --input "$CLASSIFY_HORIZON_INPUT" \
                        --operation horizon \
                        --output "$OUTPUT"
 
 # ── contours (no SVG — count + aspect ratios only, no coordinates) ────────────
-run "contours" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
+run "contours" "$CLASSIFY_CONTOURS_INPUT" \
+    "$BINARY" classify --input "$CLASSIFY_CONTOURS_INPUT" \
                        --operation contours \
                        --output "$OUTPUT"
 
 # ── aesthetics (no SVG — score only) ─────────────────────────────────────────
-run "aesthetics" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
+run "aesthetics" "$CLASSIFY_AESTHETICS_INPUT" \
+    "$BINARY" classify --input "$CLASSIFY_AESTHETICS_INPUT" \
                        --operation aesthetics \
                        --output "$OUTPUT"
 
 # ── feature-print (no SVG — embedding vector only) ────────────────────────────
-run "feature-print" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" classify --input "$EXAMPLE_IMG_GORILLA" \
+run "feature-print" "$CLASSIFY_FEATURE_PRINT_INPUT" \
+    "$BINARY" classify --input "$CLASSIFY_FEATURE_PRINT_INPUT" \
                        --operation feature-print \
                        --output "$OUTPUT"

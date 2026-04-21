@@ -21,6 +21,7 @@ for script in \
     "$SCRIPT_DIR/subcommand_nl.sh" \
     "$SCRIPT_DIR/subcommand_av.sh" \
     "$SCRIPT_DIR/subcommand_coreimage.sh" \
+    "$SCRIPT_DIR/subcommand_imagecapture.sh" \
     "$SCRIPT_DIR/subcommand_sna.sh" \
     "$SCRIPT_DIR/subcommand_speech.sh" \
     "$SCRIPT_DIR/subcommand_shazam.sh" 

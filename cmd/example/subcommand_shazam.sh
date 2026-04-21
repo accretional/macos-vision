@@ -29,7 +29,7 @@ run_file() {
 
 filename_base() { basename "$1" | sed 's/\.[^.]*$//'; }
 
-music_audio="$EXAMPLE_AUDIO_MUSIC"
+music_audio="$SHAZAM_MATCH_INPUT"
 MUSIC_BASE="$(filename_base "$music_audio")"
 
 # ── match (default operation, requires network) ───────────────────────────────

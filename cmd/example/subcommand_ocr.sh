@@ -45,7 +45,7 @@ run_ocr() {
 }
 
 # ── printed text ──────────────────────────────────────────────────────────────
-run_ocr "ocr-printed" "$EXAMPLE_IMG_TEXT_PRINTED"
+run_ocr "ocr-printed" "$OCR_PRINTED_INPUT"
 
 # ── handwritten text ──────────────────────────────────────────────────────────
-run_ocr "ocr-handwritten" "$EXAMPLE_IMG_HANDWRITING"
+run_ocr "ocr-handwritten" "$OCR_HANDWRITTEN_INPUT"

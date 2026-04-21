@@ -9,7 +9,7 @@ eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'expo
 OUTPUT="$ROOT/sample_data/output/av"
 mkdir -p "$OUTPUT"
 
-VID="$EXAMPLE_VIDEO_KAZOO"
+VID="$AV_LIST_PRESETS_INPUT"
 
 run() {
     local label="$1"; shift
@@ -110,5 +110,5 @@ run_file "waveform" "$VID" \
 
 run "tts (from file)" \
     "$BINARY" av --operation tts \
-                 --input "$EXAMPLE_TEXT_JOKER" \
+                 --input "$AV_TTS_INPUT" \
                  --output "$OUTPUT/tts_joker.m4a"
