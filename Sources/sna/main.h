@@ -26,4 +26,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+BOOL MVDispatchSNA(NSArray<NSString *> *args, NSError **error);
+
 NS_ASSUME_NONNULL_END

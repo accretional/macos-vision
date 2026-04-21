@@ -1,0 +1,96 @@
+#import "face/main.h"
+
+static BOOL isDir(NSString *p) {
+    if (!p.length) return NO;
+    BOOL d = NO;
+    return [[NSFileManager defaultManager] fileExistsAtPath:p isDirectory:&d] && d;
+}
+static NSString *stem(NSString *p) {
+    NSString *s = p.lastPathComponent.stringByDeletingPathExtension;
+    return s.length ? s : @"result";
+}
+
+static void printHelp(void) {
+    printf(
+        "USAGE: macos-vision face --operation <op> [options]\n"
+        "\n"
+        "Detect faces, bodies, and poses in images.\n"
+        "\n"
+        "OPERATIONS:\n"
+        "  face-rectangles   (default) Bounding boxes around detected faces\n"
+        "  face-landmarks    68-point facial landmark geometry\n"
+        "  face-quality      Per-face capture quality score\n"
+        "  human-rectangles  Bounding boxes around detected human bodies\n"
+        "  body-pose         17-joint human body pose skeleton\n"
+        "  hand-pose         21-point hand pose landmarks\n"
+        "  animal-pose       Animal body pose landmarks\n"
+        "\n"
+        "OPTIONS:\n"
+        "  --input <path>          Image file to process (required)\n"
+        "  --operation <op>        Operation to run (default: face-rectangles)\n"
+        "  --output <path>         Directory or .json file for JSON output\n"
+        "  --json-output <path>    Write JSON envelope to this file (default: stdout)\n"
+        "  --artifacts-dir <dir>   Write debug overlay images here (requires --debug)\n"
+        "  --boxes-format <fmt>    Overlay image format: png (default), jpg, tiff, bmp, gif\n"
+        "  --debug                 Draw detection boxes and write overlay image\n"
+    );
+}
+
+BOOL MVDispatchFace(NSArray<NSString *> *args, NSError **error) {
+    NSString *inputPath    = nil;
+    NSString *operation    = @"face-rectangles";
+    NSString *output       = nil;
+    NSString *jsonOutput   = nil;
+    NSString *artifactsDir = nil;
+    NSString *boxesFormat  = @"png";
+    BOOL debug = NO;
+
+    for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
+        NSString *a = args[i];
+        if ([a isEqualToString:@"--help"] || [a isEqualToString:@"-h"]) {
+            printHelp(); return YES;
+        } else if ([a isEqualToString:@"--input"] && i+1 < (NSInteger)args.count)          { inputPath    = args[++i]; }
+        else if ([a isEqualToString:@"--operation"] && i+1 < (NSInteger)args.count)        { operation    = args[++i]; }
+        else if ([a isEqualToString:@"--output"] && i+1 < (NSInteger)args.count)           { output       = args[++i]; }
+        else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput   = args[++i]; }
+        else if ([a isEqualToString:@"--artifacts-dir"] && i+1 < (NSInteger)args.count)    { artifactsDir = args[++i]; }
+        else if ([a isEqualToString:@"--boxes-format"] && i+1 < (NSInteger)args.count)     { boxesFormat  = args[++i]; }
+        else if ([a isEqualToString:@"--debug"]) { debug = YES; }
+        else {
+            fprintf(stderr, "face: unknown option '%s'\n", a.UTF8String);
+            printHelp();
+            if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
+                userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"face: unknown option '%@'", a]}];
+            return NO;
+        }
+    }
+
+    NSArray<NSString *> *validBoxFmts = @[@"png", @"jpg", @"jpeg", @"tiff", @"tif", @"bmp", @"gif"];
+    if (![validBoxFmts containsObject:boxesFormat.lowercaseString]) {
+        fprintf(stderr, "face: unsupported --boxes-format '%s'\n", boxesFormat.UTF8String);
+        if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
+            userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"face: unsupported --boxes-format '%@'", boxesFormat]}];
+        return NO;
+    }
+
+    // JSON: <stem>_<op>.json
+    NSString *opSlug = [[operation stringByReplacingOccurrencesOfString:@"-" withString:@"_"]
+                                   stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+    NSString *jsonName = [[NSString stringWithFormat:@"%@_%@", stem(inputPath), opSlug] stringByAppendingPathExtension:@"json"];
+    NSString *resolvedJSON = nil;
+    if (jsonOutput.length && !isDir(jsonOutput))        resolvedJSON = jsonOutput;
+    else if (jsonOutput.length && isDir(jsonOutput))    resolvedJSON = [jsonOutput stringByAppendingPathComponent:jsonName];
+    else if (output.length && isDir(output))            resolvedJSON = [output stringByAppendingPathComponent:jsonName];
+    else if ([output.pathExtension.lowercaseString isEqualToString:@"json"]) resolvedJSON = output;
+
+    NSString *resolvedArtifacts = artifactsDir.length ? artifactsDir : (isDir(output) ? output : nil);
+
+    FaceProcessor *p = [[FaceProcessor alloc] init];
+    p.inputPath    = inputPath;
+    p.jsonOutput   = resolvedJSON;
+    p.artifactsDir = resolvedArtifacts;
+    p.debug        = debug;
+    p.boxesFormat  = boxesFormat;
+    p.operation    = operation;
+    return [p runWithError:error];
+}

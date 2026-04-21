@@ -8,5 +8,9 @@
     <string>macos-vision</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>macos-vision transcribes audio files using Apple Speech Recognition.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>macos-vision captures photos and video from connected cameras.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>macos-vision records audio from the microphone.</string>
 </dict>
 </plist>

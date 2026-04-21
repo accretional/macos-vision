@@ -459,7 +459,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -516,7 +516,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -606,7 +606,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -666,7 +666,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -776,7 +776,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -851,7 +851,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -912,7 +912,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -952,7 +952,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -1031,7 +1031,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
@@ -1128,7 +1128,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
             @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
 
-    NSDictionary *envelope = MVMakeEnvelope(@"imagecapture", self.operation, nil, result);
+    NSDictionary *envelope = MVMakeEnvelope(@"imagetransfer", self.operation, nil, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 

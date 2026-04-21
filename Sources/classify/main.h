@@ -16,4 +16,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error);
+
 NS_ASSUME_NONNULL_END
