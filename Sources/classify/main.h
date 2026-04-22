@@ -11,6 +11,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *boxesFormat;
 // classify (default) | animals | rectangles | horizon | contours | aesthetics | feature-print
 @property (nonatomic, copy) NSString *operation;
+/// Read MJPEG from stdin, add X-MV-classify-<op> header per frame, write MJPEG to stdout.
+@property (nonatomic, assign) BOOL stream;
 
 - (BOOL)runWithError:(NSError **)error;
 

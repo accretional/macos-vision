@@ -14,11 +14,15 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *timesStr;
 @property (nonatomic, copy, nullable) NSString *timeRangeStr;
 @property (nonatomic, copy, nullable) NSString *metaKey;
-@property (nonatomic, copy, nullable) NSString *videosStr;   // comma-sep paths for compose
-@property (nonatomic, copy, nullable) NSString *text;        // inline text for tts
-@property (nonatomic, copy, nullable) NSString *voice;       // voice identifier for tts
-@property (nonatomic, copy, nullable) NSString *inputFile;   // --input file for tts
-@property (nonatomic, assign) NSInteger pitchHopFrames;      // --pitch-hop for pitch operation
+@property (nonatomic, copy, nullable) NSString *videosStr;    // comma-sep paths for concat
+@property (nonatomic, copy, nullable) NSString *inputsStr;    // comma-sep paths for mix
+@property (nonatomic, copy, nullable) NSString *text;         // inline text for tts / burn
+@property (nonatomic, copy, nullable) NSString *voice;        // voice identifier for tts
+@property (nonatomic, copy, nullable) NSString *inputFile;    // --input file for tts / fetch URL
+@property (nonatomic, copy, nullable) NSString *overlayPath;  // image path for burn
+@property (nonatomic, assign) NSInteger pitchHopFrames;       // --pitch-hop for pitch operation
+@property (nonatomic, assign) BOOL audioOnly;                 // --audio-only for encode
+@property (nonatomic, assign) double factor;                  // --factor for retime
 @property (nonatomic, assign) BOOL debug;
 
 - (BOOL)runWithError:(NSError **)error;

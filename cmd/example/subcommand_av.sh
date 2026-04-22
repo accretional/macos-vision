@@ -9,7 +9,8 @@ eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'expo
 OUTPUT="$ROOT/sample_data/output/av"
 mkdir -p "$OUTPUT"
 
-VID="$AV_LIST_PRESETS_INPUT"
+VID="$AV_VIDEO_INPUT"
+AUD="$AV_AUDIO_INPUT"
 
 run() {
     local label="$1"; shift
@@ -33,18 +34,19 @@ filename_base() {
 }
 
 VID_BASE="$(filename_base "$VID")"
+AUD_BASE="$(filename_base "$AUD")"
 
-# ── list-presets ──────────────────────────────────────────────────────────────
-run_file "list-presets" "$VID" \
-    "$BINARY" av --operation list-presets \
+# ── presets ───────────────────────────────────────────────────────────────────
+run_file "presets" "$VID" \
+    "$BINARY" av --operation presets \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_list_presets.json"
+                 --output "$OUTPUT/${VID_BASE}_presets.json"
 
-# ── inspect ───────────────────────────────────────────────────────────────────
-run_file "inspect" "$VID" \
-    "$BINARY" av --operation inspect \
+# ── probe ─────────────────────────────────────────────────────────────────────
+run_file "probe" "$VID" \
+    "$BINARY" av --operation probe \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_inspect.json"
+                 --output "$OUTPUT/${VID_BASE}_probe.json"
 
 # ── tracks ────────────────────────────────────────────────────────────────────
 run_file "tracks" "$VID" \
@@ -52,53 +54,61 @@ run_file "tracks" "$VID" \
                  --input "$VID" \
                  --output "$OUTPUT/${VID_BASE}_tracks.json"
 
-# ── metadata ──────────────────────────────────────────────────────────────────
-run_file "metadata" "$VID" \
-    "$BINARY" av --operation metadata \
+# ── meta ──────────────────────────────────────────────────────────────────────
+run_file "meta" "$VID" \
+    "$BINARY" av --operation meta \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_metadata.json"
+                 --output "$OUTPUT/${VID_BASE}_meta.json"
 
-# ── thumbnail (single frame) ──────────────────────────────────────────────────
-run_file "thumbnail (single)" "$VID" \
-    "$BINARY" av --operation thumbnail \
+# ── frames (single) ───────────────────────────────────────────────────────────
+run_file "frames (single)" "$VID" \
+    "$BINARY" av --operation frames \
                  --input "$VID" \
                  --time 1.0 \
-                 --artifacts-dir "$OUTPUT/thumbnails"
+                 --artifacts-dir "$OUTPUT/frames"
 
-# ── thumbnail (multiple frames) ───────────────────────────────────────────────
-run_file "thumbnail (multi)" "$VID" \
-    "$BINARY" av --operation thumbnail \
+# ── frames (multiple) ─────────────────────────────────────────────────────────
+run_file "frames (multi)" "$VID" \
+    "$BINARY" av --operation frames \
                  --input "$VID" \
                  --times "0,2,5,8" \
-                 --artifacts-dir "$OUTPUT/thumbnails"
+                 --artifacts-dir "$OUTPUT/frames"
 
-# ── export (medium quality) ───────────────────────────────────────────────────
-run_file "export (medium)" "$VID" \
-    "$BINARY" av --operation export \
+# ── encode (medium quality) ───────────────────────────────────────────────────
+run_file "encode (medium)" "$VID" \
+    "$BINARY" av --operation encode \
                  --input "$VID" \
                  --preset medium \
                  --output "$OUTPUT/${VID_BASE}_medium.mov"
 
-# ── export-audio (m4a) ────────────────────────────────────────────────────────
-run_file "export-audio" "$VID" \
-    "$BINARY" av --operation export-audio \
+# ── encode (audio-only) ───────────────────────────────────────────────────────
+run_file "encode (audio-only)" "$VID" \
+    "$BINARY" av --operation encode \
                  --input "$VID" \
+                 --audio-only \
                  --output "$OUTPUT/${VID_BASE}.m4a"
 
-# ── export (trimmed clip) ─────────────────────────────────────────────────────
-run_file "export (trimmed)" "$VID" \
-    "$BINARY" av --operation export \
+# ── encode (trimmed clip) ─────────────────────────────────────────────────────
+run_file "encode (trimmed)" "$VID" \
+    "$BINARY" av --operation encode \
                  --input "$VID" \
                  --preset medium \
-                 --time-range "0, 3" \
+                 --time-range "0,3" \
                  --output "$OUTPUT/${VID_BASE}_trimmed.mov"
 
-# ── compose (concatenate two clips) ──────────────────────────────────────────
-run_file "compose" "$VID" \
-    "$BINARY" av --operation compose \
+# ── concat (join two clips) ───────────────────────────────────────────────────
+run_file "concat" "$VID" \
+    "$BINARY" av --operation concat \
                  --videos "$VID,$VID" \
                  --preset medium \
-                 --output "$OUTPUT/${VID_BASE}_composed.mov"
+                 --output "$OUTPUT/${VID_BASE}_concat.mov"
+
+# ── split (at timestamps) ─────────────────────────────────────────────────────
+run_file "split" "$VID" \
+    "$BINARY" av --operation split \
+                 --input "$VID" \
+                 --times "3,6" \
+                 --output "$OUTPUT/split"
 
 # ── waveform ──────────────────────────────────────────────────────────────────
 run_file "waveform" "$VID" \
@@ -106,8 +116,59 @@ run_file "waveform" "$VID" \
                  --input "$VID" \
                  --output "$OUTPUT/${VID_BASE}_waveform.json"
 
-# ── tts (text-to-speech) ──────────────────────────────────────────────────────
+# ── noise ─────────────────────────────────────────────────────────────────────
+run_file "noise" "$AUD" \
+    "$BINARY" av --operation noise \
+                 --input "$AUD" \
+                 --output "$OUTPUT/${AUD_BASE}_noise.json"
 
+# ── pitch ─────────────────────────────────────────────────────────────────────
+run_file "pitch" "$AUD" \
+    "$BINARY" av --operation pitch \
+                 --input "$AUD" \
+                 --output "$OUTPUT/${AUD_BASE}_pitch.json"
+
+# ── stems (voice isolation) ───────────────────────────────────────────────────
+run_file "stems" "$AUD" \
+    "$BINARY" av --operation stems \
+                 --input "$AUD" \
+                 --output "$OUTPUT/${AUD_BASE}_stems.m4a"
+
+# ── mix (overlay two audio files) ────────────────────────────────────────────
+run_file "mix" "$AUD" \
+    "$BINARY" av --operation mix \
+                 --inputs "$AUD,$AV_MIX_INPUT_2" \
+                 --output "$OUTPUT/mix_output.m4a"
+
+# ── burn (text watermark) ────────────────────────────────────────────────────
+run_file "burn (text)" "$VID" \
+    "$BINARY" av --operation burn \
+                 --input "$VID" \
+                 --text "macos-vision" \
+                 --output "$OUTPUT/${VID_BASE}_burn_text.mp4"
+
+# ── burn (image watermark) ───────────────────────────────────────────────────
+run_file "burn (image)" "$VID" \
+    "$BINARY" av --operation burn \
+                 --input "$VID" \
+                 --overlay "$AV_BURN_OVERLAY" \
+                 --output "$OUTPUT/${VID_BASE}_burn_image.mp4"
+
+# ── retime (2x speed) ────────────────────────────────────────────────────────
+run_file "retime (2x)" "$VID" \
+    "$BINARY" av --operation retime \
+                 --input "$VID" \
+                 --factor 2.0 \
+                 --output "$OUTPUT/${VID_BASE}_2x.mp4"
+
+# ── retime (0.5x slow motion) ────────────────────────────────────────────────
+run_file "retime (0.5x)" "$VID" \
+    "$BINARY" av --operation retime \
+                 --input "$VID" \
+                 --factor 0.5 \
+                 --output "$OUTPUT/${VID_BASE}_half.mp4"
+
+# ── tts (text-to-speech) ─────────────────────────────────────────────────────
 run "tts (from file)" \
     "$BINARY" av --operation tts \
                  --input "$AV_TTS_INPUT" \

@@ -28,6 +28,8 @@ NS_ASSUME_NONNULL_BEGIN
 /// Show a live preview window before capture (photo, video, screen-record).
 @property (nonatomic, assign) BOOL preview;
 @property (nonatomic, assign) BOOL debug;
+/// Stream video frames as MJPEG to stdout (only valid with --operation video).
+@property (nonatomic, assign) BOOL stream;
 
 - (BOOL)runWithError:(NSError **)error;
 

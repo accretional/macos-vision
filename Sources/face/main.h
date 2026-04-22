@@ -12,6 +12,8 @@ NS_ASSUME_NONNULL_BEGIN
 // face-rectangles (default) | face-landmarks | face-quality |
 // human-rectangles | body-pose | hand-pose | animal-pose
 @property (nonatomic, copy) NSString *operation;
+/// Read MJPEG from stdin, add X-MV-face-<op> header per frame, write MJPEG to stdout.
+@property (nonatomic, assign) BOOL stream;
 
 - (BOOL)runWithError:(NSError **)error;
 

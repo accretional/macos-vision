@@ -1,5 +1,6 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
 #import <Cocoa/Cocoa.h>
@@ -72,6 +73,32 @@ static void CPrintNDJSON(NSDictionary *obj) {
                                   error:(NSError *)error {
     self.recordingError = error;
     self.finished = YES;
+}
+@end
+
+// ── Stream video delegate ─────────────────────────────────────────────────────
+
+@interface CaptureStreamDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
+@property (nonatomic, strong) MVMjpegWriter *writer;
+@property (nonatomic, strong) CIContext *ciContext;
+@end
+
+@implementation CaptureStreamDelegate
+- (void)captureOutput:(AVCaptureOutput *)output
+    didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
+         fromConnection:(AVCaptureConnection *)connection {
+    CVImageBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+    if (!pixelBuffer) return;
+    CIImage *ciImage = [[CIImage alloc] initWithCVImageBuffer:pixelBuffer];
+    // Correct built-in camera orientation (frames arrive rotated 180°)
+    // ciImage = [ciImage imageByApplyingCGOrientation:kCGImagePropertyOrientationDown];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    NSData *jpeg = [self.ciContext
+        JPEGRepresentationOfImage:ciImage
+                      colorSpace:cs
+                         options:@{(id)kCGImageDestinationLossyCompressionQuality: @0.85}];
+    CGColorSpaceRelease(cs);
+    if (jpeg) [self.writer writeFrame:jpeg extraHeaders:nil];
 }
 @end
 
@@ -186,7 +213,8 @@ static void CSpinUntilFlagOrStop(volatile BOOL *flag, NSTimeInterval duration) {
     if ([self.operation isEqualToString:@"screenshot"])   return [self runScreenshotWithError:error];
     if ([self.operation isEqualToString:@"photo"])        return [self runPhotoWithError:error];
     if ([self.operation isEqualToString:@"audio"])        return [self runAudioWithError:error];
-    if ([self.operation isEqualToString:@"video"])        return [self runVideoWithError:error];
+    if ([self.operation isEqualToString:@"video"])
+        return self.stream ? [self runVideoStreamWithError:error] : [self runVideoWithError:error];
     if ([self.operation isEqualToString:@"screen-record"])return [self runScreenRecordWithError:error];
     if ([self.operation isEqualToString:@"barcode"])      return [self runBarcodeWithError:error];
     if ([self.operation isEqualToString:@"list-devices"]) return [self runListDevicesWithError:error];
@@ -804,6 +832,63 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
                                       @"duration_s": @(round(recDuration * 100.0) / 100.0)} mutableCopy];
     if (self.debug) result[@"processing_ms"] = @((NSInteger)(-[start timeIntervalSinceNow] * 1000.0));
     return [self saveResult:result mediaURL:mediaURL error:error];
+}
+
+// ── video --stream ────────────────────────────────────────────────────────────
+
+- (BOOL)runVideoStreamWithError:(NSError **)error {
+    // Request camera TCC permission
+    dispatch_semaphore_t permSem = dispatch_semaphore_create(0);
+    __block BOOL permGranted = NO;
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+        permGranted = granted;
+        dispatch_semaphore_signal(permSem);
+    }];
+    dispatch_semaphore_wait(permSem, DISPATCH_TIME_FOREVER);
+    if (!permGranted) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:80
+            userInfo:@{NSLocalizedDescriptionKey:
+                @"Camera access denied — grant permission in System Settings > Privacy & Security > Camera"}];
+        return NO;
+    }
+
+    AVCaptureDevice *device = CAVVideoDevice(self.deviceIndex);
+    if (!device) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:80
+            userInfo:@{NSLocalizedDescriptionKey: @"No camera available"}];
+        return NO;
+    }
+    AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:device error:error];
+    if (!input) return NO;
+
+    AVCaptureSession *session = [[AVCaptureSession alloc] init];
+    session.sessionPreset = AVCaptureSessionPresetMedium;
+    [session addInput:input];
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    CaptureStreamDelegate *streamDelegate = [[CaptureStreamDelegate alloc] init];
+    streamDelegate.writer    = writer;
+    streamDelegate.ciContext = [CIContext context];
+
+    AVCaptureVideoDataOutput *videoOutput = [[AVCaptureVideoDataOutput alloc] init];
+    videoOutput.alwaysDiscardsLateVideoFrames = YES;
+    dispatch_queue_t captureQ = dispatch_queue_create("mv.capture.videostream", DISPATCH_QUEUE_SERIAL);
+    [videoOutput setSampleBufferDelegate:streamDelegate queue:captureQ];
+    [session addOutput:videoOutput];
+
+    gStopCapture = 0;
+    signal(SIGINT, captureSignalHandler);
+
+    [session startRunning];
+    fprintf(stderr, "Streaming from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
+
+    while (!gStopCapture) {
+        [NSThread sleepForTimeInterval:0.05];
+    }
+
+    [session stopRunning];
+    signal(SIGINT, SIG_DFL);
+    return YES;
 }
 
 // ── barcode ───────────────────────────────────────────────────────────────────

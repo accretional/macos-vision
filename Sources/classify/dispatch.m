@@ -33,6 +33,8 @@ static void printHelp(void) {
         "  --artifacts-dir <dir>   Write debug overlay images here (requires --debug)\n"
         "  --boxes-format <fmt>    Overlay image format: png (default), jpg, tiff, bmp, gif\n"
         "  --debug                 Draw detection boxes and write overlay image\n"
+        "  --stream                Read MJPEG from stdin, annotate each frame, write MJPEG to stdout\n"
+        "                          Adds X-MV-classify-<op> header per frame; pipe from streamcapture --stream\n"
     );
 }
 
@@ -43,7 +45,7 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
     NSString *jsonOutput   = nil;
     NSString *artifactsDir = nil;
     NSString *boxesFormat  = @"png";
-    BOOL debug = NO;
+    BOOL debug = NO, stream = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -55,7 +57,8 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput   = args[++i]; }
         else if ([a isEqualToString:@"--artifacts-dir"] && i+1 < (NSInteger)args.count)    { artifactsDir = args[++i]; }
         else if ([a isEqualToString:@"--boxes-format"] && i+1 < (NSInteger)args.count)     { boxesFormat  = args[++i]; }
-        else if ([a isEqualToString:@"--debug"]) { debug = YES; }
+        else if ([a isEqualToString:@"--debug"])  { debug  = YES; }
+        else if ([a isEqualToString:@"--stream"]) { stream = YES; }
         else {
             fprintf(stderr, "classify: unknown option '%s'\n", a.UTF8String);
             printHelp();
@@ -91,5 +94,6 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
     p.debug        = debug;
     p.boxesFormat  = boxesFormat;
     p.operation    = operation;
+    p.stream       = stream;
     return [p runWithError:error];
 }

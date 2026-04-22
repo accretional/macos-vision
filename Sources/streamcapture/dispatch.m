@@ -37,6 +37,8 @@ static void printHelp(void) {
         "  --preview               Show a live preview window before/during capture\n"
         "                          photo: window shows feed, press ENTER to shoot\n"
         "                          video/screen-record: press ENTER to start, ENTER to stop\n"
+        "  --stream                Stream video frames as MJPEG to stdout (video only)\n"
+        "                          Runs until Ctrl+C; pipe into face/overlay for live analysis\n"
         "  --debug                 Emit processing_ms in output\n"
     );
 }
@@ -54,6 +56,7 @@ BOOL MVDispatchStreamCapture(NSArray<NSString *> *args, NSError **error) {
     BOOL noAudio = NO;
     BOOL preview = NO;
     BOOL debug = NO;
+    BOOL stream = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -70,7 +73,8 @@ BOOL MVDispatchStreamCapture(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--types"] && i+1 < (NSInteger)args.count)            { types        = args[++i]; }
         else if ([a isEqualToString:@"--no-audio"]) { noAudio  = YES; }
         else if ([a isEqualToString:@"--preview"])  { preview  = YES; }
-        else if ([a isEqualToString:@"--debug"]) { debug = YES; }
+        else if ([a isEqualToString:@"--debug"])    { debug    = YES; }
+        else if ([a isEqualToString:@"--stream"])   { stream   = YES; }
         else {
             fprintf(stderr, "streamcapture: unknown option '%s'\n", a.UTF8String);
             printHelp();
@@ -102,5 +106,6 @@ BOOL MVDispatchStreamCapture(NSArray<NSString *> *args, NSError **error) {
     p.noAudio      = noAudio;
     p.preview      = preview;
     p.debug        = debug;
+    p.stream       = stream;
     return [p runWithError:error];
 }

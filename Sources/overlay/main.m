@@ -1,6 +1,10 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <Cocoa/Cocoa.h>
+#import <CoreImage/CoreImage.h>
+#import <ImageIO/ImageIO.h>
+#import <CoreText/CoreText.h>
 #import <math.h>
 
 static NSString * const SVGErrorDomain = @"SVGError";
@@ -48,6 +52,57 @@ static NSString *titleElem(SVGShape *shape) {
     if (shape.confidence)
         [t appendFormat:@" — %d%%", (int)round(shape.confidence.doubleValue * 100)];
     return [NSString stringWithFormat:@"<title>%@</title>", svgEscape(t)];
+}
+
+static NSUInteger OVStreamColorIdx(NSString *cls); // forward declaration
+
+/// Returns "R,G,B" for a palette slot — used for inline SVG fill and stream CoreText.
+static NSString *OVRGBString(NSUInteger idx) {
+    static const int pal[8][3] = {
+        {239, 68, 68}, {0, 221, 204}, {255, 170, 0}, {170, 255, 68},
+        {168, 85, 247}, {59, 130, 246}, {236, 72, 153}, {34, 197, 94},
+    };
+    const int *p = pal[idx % 8];
+    return [NSString stringWithFormat:@"%d,%d,%d", p[0], p[1], p[2]];
+}
+
+/// Returns an SVG label group (background pill + text) anchored at the shape's top-left,
+/// or "" if the shape has no label or is not a rect/polygon.
+static NSString *svgLabelGroup(SVGShape *shape, CGFloat w, CGFloat h) {
+    if (!shape.label.length) return @"";
+
+    CGFloat ax = 0, ay = 0;
+    if ([shape isKindOfClass:[SVGRectShape class]]) {
+        SVGRectShape *r = (SVGRectShape *)shape;
+        ax = r.rect.origin.x * w;
+        ay = r.rect.origin.y * h;
+    } else if ([shape isKindOfClass:[SVGPolygonShape class]]) {
+        SVGPolygonShape *poly = (SVGPolygonShape *)shape;
+        if (poly.points.count == 0) return @"";
+        ax = CGFLOAT_MAX; ay = CGFLOAT_MAX;
+        for (NSValue *v in poly.points) {
+            NSPoint p = v.pointValue;
+            if (p.x * w < ax) ax = p.x * w;
+            if (p.y * h < ay) ay = p.y * h;
+        }
+    } else {
+        return @"";
+    }
+
+    NSUInteger cidx = OVStreamColorIdx(shape.cssClass ?: @"");
+    NSString *rgb   = OVRGBString(cidx);
+    CGFloat bgW     = shape.label.length * 6.5 + 8.0;
+    CGFloat bgY, textY;
+    if (ay < 16.0) { bgY = ay + 1.0;  textY = ay + 13.0; }
+    else           { bgY = ay - 15.0; textY = ay - 3.0;  }
+
+    return [NSString stringWithFormat:
+        @"<g pointer-events=\"none\">"
+         "<rect x=\"%.2f\" y=\"%.2f\" width=\"%.0f\" height=\"14\" rx=\"2\" fill=\"rgba(%@,.72)\"/>"
+         "<text x=\"%.2f\" y=\"%.2f\" font-family=\"sans-serif\" font-size=\"11\" fill=\"white\">%@</text>"
+         "</g>",
+        ax, bgY, bgW, rgb,
+        ax + 2.0, textY, svgEscape(shape.label)];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -353,8 +408,14 @@ static NSString * const OV_SCRIPT =
         for (SVGShape *shape in self.shapes) {
             if (![(shape.layerID ?: @"layer-misc") isEqualToString:lid]) continue;
             NSString *elem = [shape svgElementForImageWidth:imgWidth height:imgHeight];
-            if (elem.length > 0)
+            if (elem.length > 0) {
                 [svg appendFormat:@"    %@\n", elem];
+                if (self.showLabels) {
+                    NSString *lbl = svgLabelGroup(shape, imgWidth, imgHeight);
+                    if (lbl.length > 0)
+                        [svg appendFormat:@"    %@\n", lbl];
+                }
+            }
         }
         [svg appendString:@"  </g>\n"];
     }
@@ -631,12 +692,228 @@ static NSArray<SVGShape *> *OVShapesFromJSON(NSDictionary *json) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CoreGraphics drawing helpers for stream mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+static const float OVStreamPalette[8][3] = {
+    {239/255.f,  68/255.f,  68/255.f},  // ov-c0 red
+    {  0/255.f, 221/255.f, 204/255.f},  // ov-c1 teal
+    {255/255.f, 170/255.f,   0/255.f},  // ov-c2 orange
+    {170/255.f, 255/255.f,  68/255.f},  // ov-c3 lime
+    {168/255.f,  85/255.f, 247/255.f},  // ov-c4 purple
+    { 59/255.f, 130/255.f, 246/255.f},  // ov-c5 blue
+    {236/255.f,  72/255.f, 153/255.f},  // ov-c6 pink
+    { 34/255.f, 197/255.f,  94/255.f},  // ov-c7 green
+};
+
+/// Extract the ov-cN index from a cssClass string like "ov-box ov-c3".
+static NSUInteger OVStreamColorIdx(NSString *cls) {
+    NSRange r = [cls rangeOfString:@"ov-c"];
+    if (r.location == NSNotFound) return 0;
+    NSUInteger pos = r.location + r.length;
+    if (pos < cls.length) {
+        unichar c = [cls characterAtIndex:pos];
+        if (c >= '0' && c <= '7') return (NSUInteger)(c - '0');
+    }
+    return 0;
+}
+
+static void OVSetStroke(CGContextRef ctx, NSUInteger idx, CGFloat alpha) {
+    const float *p = OVStreamPalette[idx % 8];
+    CGContextSetRGBStrokeColor(ctx, p[0], p[1], p[2], alpha);
+}
+
+static void OVSetFill(CGContextRef ctx, NSUInteger idx, CGFloat alpha) {
+    const float *p = OVStreamPalette[idx % 8];
+    CGContextSetRGBFillColor(ctx, p[0], p[1], p[2], alpha);
+}
+
+/// Draw shapes from OVShapesFromJSON onto a flipped CGBitmapContext.
+/// Context must already have a flip transform applied so (0,0) = top-left.
+static void OVDrawShapesOnContext(CGContextRef ctx, NSArray<SVGShape *> *shapes,
+                                   CGFloat w, CGFloat h, BOOL showLabels) {
+    CGContextSetLineWidth(ctx, 2.0);
+
+    for (SVGShape *shape in shapes) {
+        NSUInteger cidx = OVStreamColorIdx(shape.cssClass ?: @"");
+
+        if ([shape isKindOfClass:[SVGRectShape class]]) {
+            SVGRectShape *r = (SVGRectShape *)shape;
+            CGRect rect = CGRectMake(r.rect.origin.x * w, r.rect.origin.y * h,
+                                     r.rect.size.width * w, r.rect.size.height * h);
+            OVSetStroke(ctx, cidx, 1.0);
+            OVSetFill(ctx, cidx, 0.12);
+            CGContextFillRect(ctx, rect);
+            CGContextStrokeRect(ctx, rect);
+
+        } else if ([shape isKindOfClass:[SVGPointShape class]]) {
+            SVGPointShape *p = (SVGPointShape *)shape;
+            CGFloat cx = p.center.x * w;
+            CGFloat cy = p.center.y * h;
+            OVSetFill(ctx, cidx, 1.0);
+            CGContextFillEllipseInRect(ctx, CGRectMake(cx - p.radius, cy - p.radius,
+                                                        p.radius * 2, p.radius * 2));
+
+        } else if ([shape isKindOfClass:[SVGLineShape class]]) {
+            SVGLineShape *l = (SVGLineShape *)shape;
+            OVSetStroke(ctx, cidx, 0.7);
+            CGContextSetLineWidth(ctx, 1.5);
+            CGContextBeginPath(ctx);
+            CGContextMoveToPoint(ctx,    l.start.x * w, l.start.y * h);
+            CGContextAddLineToPoint(ctx, l.end.x   * w, l.end.y   * h);
+            CGContextStrokePath(ctx);
+            CGContextSetLineWidth(ctx, 2.0);
+
+        } else if ([shape isKindOfClass:[SVGPolygonShape class]]) {
+            SVGPolygonShape *poly = (SVGPolygonShape *)shape;
+            if (poly.points.count < 2) continue;
+            OVSetStroke(ctx, cidx, 1.0);
+            OVSetFill(ctx, cidx, 0.07);
+            CGContextBeginPath(ctx);
+            NSPoint first = [poly.points[0] pointValue];
+            CGContextMoveToPoint(ctx, first.x * w, first.y * h);
+            for (NSUInteger i = 1; i < poly.points.count; i++) {
+                NSPoint pt = [poly.points[i] pointValue];
+                CGContextAddLineToPoint(ctx, pt.x * w, pt.y * h);
+            }
+            CGContextClosePath(ctx);
+            CGContextDrawPath(ctx, kCGPathFillStroke);
+        }
+    }
+
+    if (!showLabels) return;
+
+    // Second pass: draw text labels on rects and polygons (always on top of shapes).
+    CTFontRef font = CTFontCreateWithName(CFSTR("Helvetica"), 11.0, NULL);
+    for (SVGShape *shape in shapes) {
+        if (!shape.label.length) continue;
+
+        CGFloat ax = 0, ay = 0;
+        if ([shape isKindOfClass:[SVGRectShape class]]) {
+            SVGRectShape *r = (SVGRectShape *)shape;
+            ax = r.rect.origin.x * w;
+            ay = r.rect.origin.y * h;
+        } else if ([shape isKindOfClass:[SVGPolygonShape class]]) {
+            SVGPolygonShape *poly = (SVGPolygonShape *)shape;
+            if (poly.points.count == 0) continue;
+            ax = w; ay = h;
+            for (NSValue *v in poly.points) {
+                NSPoint pt = v.pointValue;
+                if (pt.x * w < ax) ax = pt.x * w;
+                if (pt.y * h < ay) ay = pt.y * h;
+            }
+        } else {
+            continue;
+        }
+
+        NSUInteger cidx = OVStreamColorIdx(shape.cssClass ?: @"");
+        const float *pal = OVStreamPalette[cidx % 8];
+        CGFloat bgW  = shape.label.length * 6.5 + 8.0;
+        CGFloat bgH  = 15.0;
+        CGFloat bgY  = (ay < bgH + 2.0) ? ay + 1.0 : ay - bgH - 1.0;
+
+        // Background pill
+        CGContextSetRGBFillColor(ctx, pal[0], pal[1], pal[2], 0.72f);
+        CGContextFillRect(ctx, CGRectMake(ax, bgY, bgW, bgH));
+
+        // Text — CoreText uses bottom-left origin, so flip locally around the baseline.
+        NSDictionary *attrs = @{(__bridge id)kCTFontAttributeName: (__bridge id)font,
+                                (__bridge id)kCTForegroundColorFromContextAttributeName: @YES};
+        NSAttributedString *as = [[NSAttributedString alloc] initWithString:shape.label
+                                                                  attributes:attrs];
+        CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)as);
+        CGFloat textX    = ax + 2.0;
+        CGFloat baseline = bgY + 12.0; // 12px from top of pill = visual baseline
+
+        CGContextSaveGState(ctx);
+        CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 1.0);
+        CGContextTranslateCTM(ctx, textX, baseline);
+        CGContextScaleCTM(ctx, 1.0, -1.0);
+        CGContextSetTextPosition(ctx, 0, 0);
+        CTLineDraw(line, ctx);
+        CGContextRestoreGState(ctx);
+        CFRelease(line);
+    }
+    CFRelease(font);
+}
+
+/// Decode JPEG → draw shapes → re-encode to JPEG. Returns nil on failure.
+static NSData *OVAnnotateJPEG(NSData *jpeg, NSArray<SVGShape *> *shapes, BOOL showLabels) {
+    CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
+    if (!src) return nil;
+    CGImageRef srcImg = CGImageSourceCreateImageAtIndex(src, 0, nil);
+    CFRelease(src);
+    if (!srcImg) return nil;
+
+    size_t w = CGImageGetWidth(srcImg);
+    size_t h = CGImageGetHeight(srcImg);
+
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, w * 4, cs,
+                                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    if (!ctx) { CGImageRelease(srcImg); return nil; }
+
+    // Draw source image (CG origin is bottom-left; flip so (0,0) = top-left for shape drawing)
+    CGContextTranslateCTM(ctx, 0, (CGFloat)h);
+    CGContextScaleCTM(ctx, 1.0, -1.0);
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), srcImg);
+    CGImageRelease(srcImg);
+
+    // Undo flip so shapes draw in top-left space
+    CGContextScaleCTM(ctx, 1.0, -1.0);
+    CGContextTranslateCTM(ctx, 0, -(CGFloat)h);
+
+    OVDrawShapesOnContext(ctx, shapes, (CGFloat)w, (CGFloat)h, showLabels);
+
+    CGImageRef outImg = CGBitmapContextCreateImage(ctx);
+    CGContextRelease(ctx);
+    if (!outImg) return nil;
+
+    NSMutableData *outData = [NSMutableData data];
+    CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)outData,
+                                                                   kUTTypeJPEG, 1, nil);
+    if (!dest) { CGImageRelease(outImg); return nil; }
+    NSDictionary *props = @{(id)kCGImageDestinationLossyCompressionQuality: @0.85};
+    CGImageDestinationAddImage(dest, outImg, (__bridge CFDictionaryRef)props);
+    BOOL ok = CGImageDestinationFinalize(dest);
+    CFRelease(dest);
+    CGImageRelease(outImg);
+    return ok ? outData : nil;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OverlayProcessor
 // ─────────────────────────────────────────────────────────────────────────────
 
 @implementation OverlayProcessor
 
+- (BOOL)runStreamWithError:(NSError **)error {
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *headers) {
+        // Collect shapes from every X-MV-* header
+        NSMutableArray<SVGShape *> *shapes = [NSMutableArray array];
+        for (NSString *key in headers) {
+            if (![key hasPrefix:@"X-MV-"]) continue;
+            NSString *jsonStr = headers[key];
+            NSData *jsonData = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+            if (!jsonData) continue;
+            NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
+            if ([dict isKindOfClass:[NSDictionary class]])
+                [shapes addObjectsFromArray:OVShapesFromJSON(dict)];
+        }
+
+        NSData *out = shapes.count ? OVAnnotateJPEG(jpeg, shapes, self.showLabels) : nil;
+        [writer writeFrame:(out ?: jpeg) extraHeaders:nil];
+    }];
+
+    return YES;
+}
+
 - (BOOL)runWithError:(NSError **)error {
+    if (self.stream) return [self runStreamWithError:error];
     if (!self.jsonPath.length) {
         if (error) *error = [NSError errorWithDomain:SVGErrorDomain code:SVGErrorMissingInput
                                             userInfo:@{NSLocalizedDescriptionKey:
@@ -665,6 +942,7 @@ static NSArray<SVGShape *> *OVShapesFromJSON(NSDictionary *json) {
                      stringByAppendingPathComponent:imagePath];
 
     SVGOverlay *overlay = [[SVGOverlay alloc] initWithImagePath:imagePath];
+    overlay.showLabels  = self.showLabels;
     [overlay addShapes:OVShapesFromJSON(doc)];
 
     NSString *base    = [[self.jsonPath lastPathComponent] stringByDeletingPathExtension];

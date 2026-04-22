@@ -1,7 +1,9 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
+#import <ImageIO/ImageIO.h>
 
 static NSString * const FaceErrorDomain = @"FaceError";
 typedef NS_ENUM(NSInteger, FaceErrorCode) {
@@ -75,15 +77,221 @@ static NSString *extensionForFormat(NSString *fmt) {
 // ── public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
+    if (self.stream) return [self runStreamWithError:error];
     NSString *op = self.operation.length ? self.operation : @"face-rectangles";
     if (!self.inputPath.length) {
         if (error) {
             *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorMissingInput
-                                    userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image> (or --stream for pipeline mode)"}];
         }
         return NO;
     }
     return [self processImage:self.inputPath operation:op error:error];
+}
+
+// ── stream mode ───────────────────────────────────────────────────────────────
+
+- (BOOL)runStreamWithError:(NSError **)error {
+    NSString *op = self.operation.length ? self.operation : @"face-rectangles";
+    NSString *headerKey = [NSString stringWithFormat:@"X-MV-face-%@", op];
+
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
+        // Decode JPEG → CGImageRef
+        CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
+        CGImageRef cg = src ? CGImageSourceCreateImageAtIndex(src, 0, nil) : NULL;
+        if (src) CFRelease(src);
+
+        // Pass-through all headers except Content-Type / Content-Length (re-added by writer)
+        NSMutableDictionary<NSString *, NSString *> *outHeaders = [NSMutableDictionary dictionaryWithDictionary:inHeaders];
+        [outHeaders removeObjectForKey:@"Content-Type"];
+        [outHeaders removeObjectForKey:@"Content-Length"];
+
+        if (cg) {
+            NSDictionary *result = [self detectCGImage:cg operation:op];
+            CGImageRelease(cg);
+            if (result) {
+                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+                if (jsonData)
+                    outHeaders[headerKey] = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+            }
+        }
+
+        [writer writeFrame:jpeg extraHeaders:outHeaders];
+    }];
+
+    return YES;
+}
+
+/// Run detection on a CGImageRef and return the result dict (operation + detections), or nil on failure.
+- (nullable NSDictionary *)detectCGImage:(CGImageRef)cg operation:(NSString *)op {
+    if ([op isEqualToString:@"face-rectangles"])   return [self detectFaceRectangles:cg];
+    if ([op isEqualToString:@"face-landmarks"])    return [self detectFaceLandmarks:cg];
+    if ([op isEqualToString:@"face-quality"])      return [self detectFaceQuality:cg];
+    if ([op isEqualToString:@"human-rectangles"])  return [self detectHumanRectangles:cg];
+    if ([op isEqualToString:@"body-pose"])         return [self detectBodyPose:cg];
+    if ([op isEqualToString:@"hand-pose"])         return [self detectHandPose:cg];
+    if ([op isEqualToString:@"animal-pose"])       return [self detectAnimalPose:cg];
+    return nil;
+}
+
+- (nullable NSDictionary *)detectFaceRectangles:(CGImageRef)cg {
+    __block NSArray *results = nil;
+    __block NSError *vnErr = nil;
+    VNDetectFaceRectanglesRequest *req = [[VNDetectFaceRectanglesRequest alloc]
+        initWithCompletionHandler:^(VNRequest *r, NSError *e) { vnErr = e; results = r.results; }];
+    VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+    if (![h performRequests:@[req] error:nil] || vnErr) return nil;
+    NSMutableArray *faces = [NSMutableArray array];
+    for (VNFaceObservation *obs in results)
+        [faces addObject:@{@"boundingBox": boxDict(obs.boundingBox), @"confidence": @(obs.confidence)}];
+    return @{@"operation": @"face-rectangles", @"faces": faces};
+}
+
+- (nullable NSDictionary *)detectFaceLandmarks:(CGImageRef)cg {
+    __block NSArray *results = nil;
+    __block NSError *vnErr = nil;
+    VNDetectFaceLandmarksRequest *req = [[VNDetectFaceLandmarksRequest alloc]
+        initWithCompletionHandler:^(VNRequest *r, NSError *e) { vnErr = e; results = r.results; }];
+    VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+    if (![h performRequests:@[req] error:nil] || vnErr) return nil;
+    NSMutableArray *faces = [NSMutableArray array];
+    for (VNFaceObservation *obs in results) {
+        CGRect bbox = obs.boundingBox;
+        NSMutableDictionary *face = [NSMutableDictionary dictionaryWithDictionary:
+            @{@"boundingBox": boxDict(bbox), @"confidence": @(obs.confidence)}];
+        VNFaceLandmarks2D *lm = obs.landmarks;
+        if (lm) {
+            NSMutableDictionary *landmarks = [NSMutableDictionary dictionary];
+            void (^add)(NSString *, VNFaceLandmarkRegion2D *) = ^(NSString *key, VNFaceLandmarkRegion2D *region) {
+                NSArray *pts = landmarkPts(region, bbox);
+                if (pts.count > 0) landmarks[key] = pts;
+            };
+            add(@"faceContour",  lm.faceContour);  add(@"leftEye",      lm.leftEye);
+            add(@"rightEye",     lm.rightEye);      add(@"leftEyebrow",  lm.leftEyebrow);
+            add(@"rightEyebrow", lm.rightEyebrow);  add(@"nose",         lm.nose);
+            add(@"noseCrest",    lm.noseCrest);      add(@"medianLine",   lm.medianLine);
+            add(@"outerLips",    lm.outerLips);      add(@"innerLips",    lm.innerLips);
+            add(@"leftPupil",    lm.leftPupil);      add(@"rightPupil",   lm.rightPupil);
+            face[@"landmarks"] = landmarks;
+        }
+        [faces addObject:face];
+    }
+    return @{@"operation": @"face-landmarks", @"faces": faces};
+}
+
+- (nullable NSDictionary *)detectFaceQuality:(CGImageRef)cg {
+    __block NSArray *results = nil;
+    __block NSError *vnErr = nil;
+    VNDetectFaceCaptureQualityRequest *req = [[VNDetectFaceCaptureQualityRequest alloc]
+        initWithCompletionHandler:^(VNRequest *r, NSError *e) { vnErr = e; results = r.results; }];
+    VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+    if (![h performRequests:@[req] error:nil] || vnErr) return nil;
+    NSMutableArray *faces = [NSMutableArray array];
+    for (VNFaceObservation *obs in results) {
+        NSMutableDictionary *face = [NSMutableDictionary dictionaryWithDictionary:@{@"boundingBox": boxDict(obs.boundingBox)}];
+        if (obs.faceCaptureQuality) face[@"quality"] = obs.faceCaptureQuality;
+        [faces addObject:face];
+    }
+    return @{@"operation": @"face-quality", @"faces": faces};
+}
+
+- (nullable NSDictionary *)detectHumanRectangles:(CGImageRef)cg {
+    if (@available(macOS 12.0, *)) {
+        __block NSArray *results = nil;
+        __block NSError *vnErr = nil;
+        VNDetectHumanRectanglesRequest *req = [[VNDetectHumanRectanglesRequest alloc]
+            initWithCompletionHandler:^(VNRequest *r, NSError *e) { vnErr = e; results = r.results; }];
+        VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+        if (![h performRequests:@[req] error:nil] || vnErr) return nil;
+        NSMutableArray *humans = [NSMutableArray array];
+        for (VNHumanObservation *obs in results)
+            [humans addObject:@{@"boundingBox": boxDict(obs.boundingBox),
+                                @"confidence": @(obs.confidence),
+                                @"upperBodyOnly": @(obs.upperBodyOnly)}];
+        return @{@"operation": @"human-rectangles", @"humans": humans};
+    }
+    return nil;
+}
+
+- (nullable NSDictionary *)detectBodyPose:(CGImageRef)cg {
+    if (@available(macOS 11.0, *)) {
+        __block NSArray *results = nil;
+        __block NSError *vnErr = nil;
+        VNDetectHumanBodyPoseRequest *req = [[VNDetectHumanBodyPoseRequest alloc]
+            initWithCompletionHandler:^(VNRequest *r, NSError *e) { vnErr = e; results = r.results; }];
+        VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+        if (![h performRequests:@[req] error:nil] || vnErr) return nil;
+        NSMutableArray *bodies = [NSMutableArray array];
+        for (VNHumanBodyPoseObservation *obs in results) {
+            NSMutableDictionary *joints = [NSMutableDictionary dictionary];
+            for (VNHumanBodyPoseObservationJointName name in obs.availableJointNames) {
+                VNRecognizedPoint *pt = [obs recognizedPointForJointName:name error:nil];
+                if (pt && pt.confidence > 0)
+                    joints[name] = @{@"x": @(pt.location.x), @"y": @(1.0 - pt.location.y), @"confidence": @(pt.confidence)};
+            }
+            [bodies addObject:@{@"confidence": @(obs.confidence), @"joints": joints}];
+        }
+        return @{@"operation": @"body-pose", @"bodies": bodies};
+    }
+    return nil;
+}
+
+- (nullable NSDictionary *)detectHandPose:(CGImageRef)cg {
+    if (@available(macOS 11.0, *)) {
+        __block NSArray *results = nil;
+        __block NSError *vnErr = nil;
+        VNDetectHumanHandPoseRequest *req = [[VNDetectHumanHandPoseRequest alloc]
+            initWithCompletionHandler:^(VNRequest *r, NSError *e) { vnErr = e; results = r.results; }];
+        req.maximumHandCount = 2;
+        VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+        if (![h performRequests:@[req] error:nil] || vnErr) return nil;
+        NSMutableArray *hands = [NSMutableArray array];
+        for (VNHumanHandPoseObservation *obs in results) {
+            NSString *chirality = @"unknown";
+            if (@available(macOS 12.0, *)) {
+                switch (obs.chirality) {
+                    case VNChiralityLeft:  chirality = @"left";  break;
+                    case VNChiralityRight: chirality = @"right"; break;
+                    default: break;
+                }
+            }
+            NSMutableDictionary *joints = [NSMutableDictionary dictionary];
+            for (VNHumanHandPoseObservationJointName name in obs.availableJointNames) {
+                VNRecognizedPoint *pt = [obs recognizedPointForJointName:name error:nil];
+                if (pt && pt.confidence > 0)
+                    joints[name] = @{@"x": @(pt.location.x), @"y": @(1.0 - pt.location.y), @"confidence": @(pt.confidence)};
+            }
+            [hands addObject:@{@"chirality": chirality, @"confidence": @(obs.confidence), @"joints": joints}];
+        }
+        return @{@"operation": @"hand-pose", @"hands": hands};
+    }
+    return nil;
+}
+
+- (nullable NSDictionary *)detectAnimalPose:(CGImageRef)cg {
+    if (@available(macOS 14.0, *)) {
+        __block NSArray *results = nil;
+        __block NSError *vnErr = nil;
+        VNDetectAnimalBodyPoseRequest *req = [[VNDetectAnimalBodyPoseRequest alloc]
+            initWithCompletionHandler:^(VNRequest *r, NSError *e) { vnErr = e; results = r.results; }];
+        VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+        if (![h performRequests:@[req] error:nil] || vnErr) return nil;
+        NSMutableArray *animals = [NSMutableArray array];
+        for (VNAnimalBodyPoseObservation *obs in results) {
+            NSMutableDictionary *joints = [NSMutableDictionary dictionary];
+            for (VNAnimalBodyPoseObservationJointName name in obs.availableJointNames) {
+                VNRecognizedPoint *pt = [obs recognizedPointForJointName:name error:nil];
+                if (pt && pt.confidence > 0)
+                    joints[name] = @{@"x": @(pt.location.x), @"y": @(1.0 - pt.location.y), @"confidence": @(pt.confidence)};
+            }
+            [animals addObject:@{@"confidence": @(obs.confidence), @"joints": joints}];
+        }
+        return @{@"operation": @"animal-pose", @"animals": animals};
+    }
+    return nil;
 }
 
 - (BOOL)processImage:(NSString *)imagePath operation:(NSString *)op error:(NSError **)error {

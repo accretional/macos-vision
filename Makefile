@@ -13,7 +13,7 @@ release:
 	swift build -c release
 
 install: release
-	cp $(BINARY_RELEASE) $(INSTALL_PATH)
+	sudo cp $(BINARY_RELEASE) $(INSTALL_PATH)
 
 clean:
 	swift package clean

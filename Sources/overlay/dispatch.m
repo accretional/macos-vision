@@ -21,6 +21,9 @@ static void printHelp(void) {
         "  --input <path>          Override the image path embedded in the JSON\n"
         "  --output <path>         Output .svg file path (default: <json-basename>.svg)\n"
         "  --json-output <path>    Write JSON envelope to this file (default: stdout)\n"
+        "  --stream                Read MJPEG from stdin, draw X-MV-* annotations, write MJPEG to stdout\n"
+        "                          Terminal stage in a pipeline: ... | overlay --stream | ffplay -f mpjpeg -\n"
+        "  --show-labels           Draw visible text labels on bounding boxes and polygons\n"
     );
 }
 
@@ -29,6 +32,8 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
     NSString *inputPath  = nil;
     NSString *output     = nil;
     NSString *jsonOutput = nil;
+    BOOL stream      = NO;
+    BOOL showLabels  = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -38,6 +43,8 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--input"] && i+1 < (NSInteger)args.count)            { inputPath  = args[++i]; }
         else if ([a isEqualToString:@"--output"] && i+1 < (NSInteger)args.count)           { output     = args[++i]; }
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput = args[++i]; }
+        else if ([a isEqualToString:@"--stream"])      { stream     = YES; }
+        else if ([a isEqualToString:@"--show-labels"]) { showLabels = YES; }
         else {
             fprintf(stderr, "overlay: unknown option '%s'\n", a.UTF8String);
             printHelp();
@@ -57,9 +64,11 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
     else if ([output.pathExtension.lowercaseString isEqualToString:@"json"]) resolvedJSON = output;
 
     OverlayProcessor *p = [[OverlayProcessor alloc] init];
-    p.jsonPath   = jsonPath;
-    p.inputPath  = inputPath;
-    p.svgOutput  = output;
-    p.jsonOutput = resolvedJSON;
+    p.jsonPath    = jsonPath;
+    p.inputPath   = inputPath;
+    p.svgOutput   = output;
+    p.jsonOutput  = resolvedJSON;
+    p.stream      = stream;
+    p.showLabels  = showLabels;
     return [p runWithError:error];
 }

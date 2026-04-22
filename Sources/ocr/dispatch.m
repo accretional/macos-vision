@@ -25,6 +25,8 @@ static void printHelp(void) {
         "  --boxes-format <fmt>    Overlay image format: png (default), jpg, tiff, bmp, gif\n"
         "  --lang                  List supported recognition languages instead of processing\n"
         "  --debug                 Draw bounding boxes and write overlay image\n"
+        "  --stream                Read MJPEG from stdin, annotate each frame, write MJPEG to stdout\n"
+        "                          Adds X-MV-ocr-recognize header per frame; pipe from streamcapture --stream\n"
     );
 }
 
@@ -35,7 +37,7 @@ BOOL MVDispatchOCR(NSArray<NSString *> *args, NSError **error) {
     NSString *artifactsDir = nil;
     NSString *recLangs     = nil;
     NSString *boxesFormat  = @"png";
-    BOOL debug = NO, lang = NO;
+    BOOL debug = NO, lang = NO, stream = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -47,8 +49,9 @@ BOOL MVDispatchOCR(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--artifacts-dir"] && i+1 < (NSInteger)args.count)    { artifactsDir = args[++i]; }
         else if ([a isEqualToString:@"--rec-langs"] && i+1 < (NSInteger)args.count)        { recLangs     = args[++i]; }
         else if ([a isEqualToString:@"--boxes-format"] && i+1 < (NSInteger)args.count)     { boxesFormat  = args[++i]; }
-        else if ([a isEqualToString:@"--debug"])  { debug = YES; }
-        else if ([a isEqualToString:@"--lang"])   { lang  = YES; }
+        else if ([a isEqualToString:@"--debug"])  { debug  = YES; }
+        else if ([a isEqualToString:@"--lang"])   { lang   = YES; }
+        else if ([a isEqualToString:@"--stream"]) { stream = YES; }
         else {
             fprintf(stderr, "ocr: unknown option '%s'\n", a.UTF8String);
             printHelp();
@@ -84,5 +87,6 @@ BOOL MVDispatchOCR(NSArray<NSString *> *args, NSError **error) {
     p.lang         = lang;
     p.recLangs     = recLangs;
     p.boxesFormat  = boxesFormat;
+    p.stream       = stream;
     return [p runWithError:error];
 }
