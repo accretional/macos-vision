@@ -71,34 +71,124 @@ static NSString *extensionForFormat(NSString *fmt) {
 @implementation FaceProcessor
 
 - (instancetype)init {
-    return [super init];
+    if ((self = [super init])) {
+        _maxLag = 1;
+    }
+    return self;
 }
 
 // ── public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    if (self.stream) return [self runStreamWithError:error];
+    if (self.stream)    return [self runStreamWithError:error];    // S→S or S→F
+    if (self.streamOut) return [self runFileToStreamWithError:error]; // F→S
+    // F→F file mode
     NSString *op = self.operation.length ? self.operation : @"face-rectangles";
     if (!self.inputPath.length) {
         if (error) {
             *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorMissingInput
-                                    userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image> (or --stream for pipeline mode)"}];
+                                    userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
         }
         return NO;
     }
-    return [self processImage:self.inputPath operation:op error:error];
+    // Support comma-separated multi-operations in file mode
+    NSArray<NSString *> *ops = [op componentsSeparatedByString:@","];
+    if (ops.count == 1) {
+        return [self processImage:self.inputPath operation:op error:error];
+    }
+    for (NSString *singleOp in ops) {
+        NSString *trimmed = [singleOp stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (!trimmed.length) continue;
+        if (![self processImage:self.inputPath operation:trimmed error:error]) return NO;
+    }
+    return YES;
+}
+
+// ── F→S mode: file input → single MJPEG frame out ────────────────────────────
+
+- (BOOL)runFileToStreamWithError:(NSError **)error {
+    NSString *op = self.operation.length ? self.operation : @"face-rectangles";
+    if (!self.inputPath.length) {
+        if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorMissingInput
+                            userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
+        return NO;
+    }
+
+    CGImageRef cg = [self loadCGImage:self.inputPath error:error];
+    if (!cg) return NO;
+
+    // Run all operations, collecting X-MV-* headers
+    NSMutableDictionary<NSString *, NSString *> *headers = [NSMutableDictionary dictionary];
+    NSArray<NSString *> *ops = [op componentsSeparatedByString:@","];
+    for (NSString *singleOp in ops) {
+        NSString *trimmed = [singleOp stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (!trimmed.length) continue;
+        NSDictionary *result = [self detectCGImage:cg operation:trimmed];
+        if (result) {
+            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+            if (jsonData)
+                headers[[NSString stringWithFormat:@"X-MV-face-%@", trimmed]] =
+                    [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+        }
+    }
+    CGImageRelease(cg);
+
+    // Encode image to JPEG for the MJPEG frame (pass-through if already JPEG)
+    NSData *jpegData = nil;
+    NSString *ext = self.inputPath.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])
+        jpegData = [NSData dataWithContentsOfFile:self.inputPath];
+    if (!jpegData) {
+        NSImage *img = [[NSImage alloc] initWithContentsOfFile:self.inputPath];
+        NSBitmapImageRep *rep = img ? [[NSBitmapImageRep alloc] initWithData:[img TIFFRepresentation]] : nil;
+        jpegData = [rep representationUsingType:NSBitmapImageFileTypeJPEG
+                                     properties:@{NSImageCompressionFactor: @0.85}];
+    }
+    if (!jpegData) {
+        if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorEncodeFailed
+                            userInfo:@{NSLocalizedDescriptionKey: @"Failed to encode image as JPEG for stream"}];
+        return NO;
+    }
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+    [writer writeFrame:jpegData extraHeaders:headers];
+    return YES;
 }
 
 // ── stream mode ───────────────────────────────────────────────────────────────
 
 - (BOOL)runStreamWithError:(NSError **)error {
-    NSString *op = self.operation.length ? self.operation : @"face-rectangles";
-    NSString *headerKey = [NSString stringWithFormat:@"X-MV-face-%@", op];
+    NSString *opStr = self.operation.length ? self.operation : @"face-rectangles";
+    NSArray<NSString *> *ops = [opStr componentsSeparatedByString:@","];
+    NSMutableArray<NSString *> *trimmedOps = [NSMutableArray array];
+    for (NSString *o in ops) {
+        NSString *t = [o stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (t.length) [trimmedOps addObject:t];
+    }
+    if (!trimmedOps.count) [trimmedOps addObject:@"face-rectangles"];
 
     MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
     MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+
+    NSInteger maxLag = self.maxLag > 0 ? self.maxLag : 0;
+    __block NSInteger pendingCount = 0;
+    NSLock *pendingLock = [[NSLock alloc] init];
 
     [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
+        // Drop frames when backpressure exceeds maxLag
+        if (maxLag > 0) {
+            [pendingLock lock];
+            NSInteger pending = pendingCount;
+            [pendingLock unlock];
+            if (pending >= maxLag) return;
+        }
+
+        [pendingLock lock];
+        pendingCount++;
+        [pendingLock unlock];
+
         // Decode JPEG → CGImageRef
         CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
         CGImageRef cg = src ? CGImageSourceCreateImageAtIndex(src, 0, nil) : NULL;
@@ -110,16 +200,23 @@ static NSString *extensionForFormat(NSString *fmt) {
         [outHeaders removeObjectForKey:@"Content-Length"];
 
         if (cg) {
-            NSDictionary *result = [self detectCGImage:cg operation:op];
-            CGImageRelease(cg);
-            if (result) {
-                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-                if (jsonData)
-                    outHeaders[headerKey] = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+            for (NSString *op in trimmedOps) {
+                NSDictionary *result = [self detectCGImage:cg operation:op];
+                if (result) {
+                    NSString *headerKey = [NSString stringWithFormat:@"X-MV-face-%@", op];
+                    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+                    if (jsonData)
+                        outHeaders[headerKey] = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                }
             }
+            CGImageRelease(cg);
         }
 
         [writer writeFrame:jpeg extraHeaders:outHeaders];
+
+        [pendingLock lock];
+        pendingCount--;
+        [pendingLock unlock];
     }];
 
     return YES;
@@ -682,18 +779,18 @@ static NSString *extensionForFormat(NSString *fmt) {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 - (nullable CGImageRef)loadCGImage:(NSString *)imagePath error:(NSError **)error {
-    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
-    if (!image) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:imagePath]) {
         if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorImageLoadFailed
                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                [NSString stringWithFormat:@"Failed to load image: %@", imagePath]}];
+                                                [NSString stringWithFormat:@"File not found: %@", imagePath]}];
         return NULL;
     }
-    CGImageRef cg = [image CGImageForProposedRect:nil context:nil hints:nil];
+    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
+    CGImageRef cg = image ? [image CGImageForProposedRect:nil context:nil hints:nil] : NULL;
     if (!cg) {
         if (error) *error = [NSError errorWithDomain:FaceErrorDomain code:FaceErrorImageLoadFailed
                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                [NSString stringWithFormat:@"Failed to convert image: %@", imagePath]}];
+                                                [NSString stringWithFormat:@"Failed to load image (unsupported format?): %@", imagePath]}];
         return NULL;
     }
     CGImageRetain(cg);

@@ -25,6 +25,10 @@ typedef void (^MVMjpegFrameHandler)(NSData *jpeg, NSDictionary<NSString *, NSStr
 - (void)writeFrame:(NSData *)jpeg
       extraHeaders:(nullable NSDictionary<NSString *, NSString *> *)extraHeaders;
 
+/// When set, X-MV-* header values are accumulated and written as NDJSON lines to this file path.
+/// One JSON object per frame, written alongside the MJPEG stream. nil = disabled.
+@property (nonatomic, copy, nullable) NSString *ndjsonOutputPath;
+
 @end
 
 // ─────────────────────────────────────────────────────────────────────────────

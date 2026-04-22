@@ -1,5 +1,6 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <CoreImage/CoreImage.h>
 #import <Cocoa/Cocoa.h>
 
@@ -29,6 +30,7 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
+    if (self.streamOut && !self.stream) return [self runFileToStreamWithError:error]; // F→S
     NSArray *validOps = @[@"apply-filter", @"suggest-filters", @"list-filters", @"auto-adjust"];
     if (![validOps containsObject:self.operation]) {
         if (error) {
@@ -93,6 +95,81 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
     if (!result) return NO;
     NSDictionary *envelope = MVMakeEnvelope(@"coreimage", self.operation, self.inputPath, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
+}
+
+// ── F→S mode: file input → single MJPEG frame out ────────────────────────────
+
+- (BOOL)runFileToStreamWithError:(NSError **)error {
+    NSString *op = self.operation.length ? self.operation : @"apply-filter";
+
+    // list-filters has no image input; fall through to file mode
+    if ([op isEqualToString:@"list-filters"]) {
+        self.streamOut = NO;
+        return [self runWithError:error];
+    }
+
+    NSDictionary *result = nil;
+    NSData *frameJpeg = nil;
+
+    if ([op isEqualToString:@"apply-filter"]) {
+        // applyFilterWithError: saves the filtered image and returns result dict
+        result = [self applyFilterWithError:error];
+        if (!result) return NO;
+
+        // Use the filtered image file as the MJPEG frame
+        NSString *outPath = result[@"output"];
+        if (outPath.length) {
+            // Resolve relative path
+            if (![outPath hasPrefix:@"/"]) {
+                outPath = [[[NSFileManager defaultManager] currentDirectoryPath]
+                           stringByAppendingPathComponent:outPath];
+            }
+            CIImage *ciImg = [CIImage imageWithContentsOfURL:[NSURL fileURLWithPath:outPath]];
+            if (ciImg) {
+                CIContext *ctx = [CIContext contextWithOptions:nil];
+                CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+                frameJpeg = [ctx JPEGRepresentationOfImage:ciImg colorSpace:cs options:@{}];
+                CGColorSpaceRelease(cs);
+            }
+        }
+    } else if ([op isEqualToString:@"suggest-filters"] || [op isEqualToString:@"auto-adjust"]) {
+        result = [op isEqualToString:@"suggest-filters"]
+            ? [self suggestFiltersWithError:error]
+            : [self autoAdjustWithError:error];
+        if (!result) return NO;
+    }
+
+    // Fall back to original image as JPEG frame
+    if (!frameJpeg && self.inputPath.length) {
+        NSString *ext = self.inputPath.pathExtension.lowercaseString;
+        if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])
+            frameJpeg = [NSData dataWithContentsOfFile:self.inputPath];
+        if (!frameJpeg) {
+            NSImage *img = [[NSImage alloc] initWithContentsOfFile:self.inputPath];
+            NSBitmapImageRep *rep = img ? [[NSBitmapImageRep alloc] initWithData:[img TIFFRepresentation]] : nil;
+            frameJpeg = [rep representationUsingType:NSBitmapImageFileTypeJPEG
+                                          properties:@{NSImageCompressionFactor: @0.85}];
+        }
+    }
+
+    if (!frameJpeg) {
+        NSString *detail = (!self.inputPath.length && [op isEqualToString:@"apply-filter"])
+            ? @"Generator/gradient filters have no source image; provide --input <image> to supply the MJPEG frame"
+            : @"Failed to encode image as JPEG for stream output";
+        if (error) *error = [NSError errorWithDomain:CIProcessorErrorDomain code:CIProcessorErrorEncodeFailed
+                            userInfo:@{NSLocalizedDescriptionKey: detail}];
+        return NO;
+    }
+
+    NSDictionary *envelope = MVMakeEnvelope(@"coreimage", op, self.inputPath, result ?: @{});
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:envelope options:0 error:nil];
+    NSString *jsonStr = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{}";
+    if (self.jsonOutput.length) MVEmitEnvelope(envelope, self.jsonOutput, nil);
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+    [writer writeFrame:frameJpeg extraHeaders:@{ [NSString stringWithFormat:@"X-MV-coreimage-%@", op]: jsonStr }];
+    return YES;
 }
 
 // ── apply-filter ──────────────────────────────────────────────────────────────

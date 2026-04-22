@@ -45,14 +45,16 @@ static NSData *MVHeaderSeparator(void) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @implementation MVMjpegWriter {
-    int     _fd;
-    NSLock *_lock;
+    int          _fd;
+    NSLock      *_lock;
+    NSUInteger   _frameIndex;
 }
 
 - (instancetype)initWithFileDescriptor:(int)fd {
     if ((self = [super init])) {
-        _fd   = fd;
-        _lock = [[NSLock alloc] init];
+        _fd         = fd;
+        _lock       = [[NSLock alloc] init];
+        _frameIndex = 0;
     }
     return self;
 }
@@ -72,7 +74,43 @@ static NSData *MVHeaderSeparator(void) {
     [_lock lock];
     write(_fd, hdrData.bytes, hdrData.length);
     write(_fd, jpeg.bytes,    jpeg.length);
+    NSUInteger frameIdx = _frameIndex++;
     [_lock unlock];
+
+    // Dual-write: if ndjsonOutputPath is set, collect X-MV-* headers and write NDJSON line
+    if (_ndjsonOutputPath && extraHeaders.count > 0) {
+        NSMutableDictionary *mvHeaders = [NSMutableDictionary dictionary];
+        for (NSString *key in extraHeaders) {
+            if ([key hasPrefix:@"X-MV-"]) {
+                // Parse the JSON string value into an object
+                NSString *valStr = extraHeaders[key];
+                NSData *valData = [valStr dataUsingEncoding:NSUTF8StringEncoding];
+                id parsed = valData ? [NSJSONSerialization JSONObjectWithData:valData options:0 error:nil] : nil;
+                mvHeaders[key] = parsed ?: valStr;
+            }
+        }
+        if (mvHeaders.count > 0) {
+            NSDictionary *line = @{@"frame": @(frameIdx), @"headers": mvHeaders};
+            NSData *lineData = [NSJSONSerialization dataWithJSONObject:line options:0 error:nil];
+            if (lineData) {
+                NSMutableData *lineWithNewline = [lineData mutableCopy];
+                const uint8_t newline = '\n';
+                [lineWithNewline appendBytes:&newline length:1];
+
+                NSString *path = _ndjsonOutputPath;
+                // Create file if it doesn't exist, then append
+                if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+                    [[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil];
+                }
+                NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+                if (fh) {
+                    [fh seekToEndOfFile];
+                    [fh writeData:lineWithNewline];
+                    [fh closeFile];
+                }
+            }
+        }
+    }
 }
 
 @end

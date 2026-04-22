@@ -1,4 +1,5 @@
 #import "overlay/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -21,8 +22,10 @@ static void printHelp(void) {
         "  --input <path>          Override the image path embedded in the JSON\n"
         "  --output <path>         Output .svg file path (default: <json-basename>.svg)\n"
         "  --json-output <path>    Write JSON envelope to this file (default: stdout)\n"
-        "  --stream                Read MJPEG from stdin, draw X-MV-* annotations, write MJPEG to stdout\n"
-        "                          Terminal stage in a pipeline: ... | overlay --stream | ffplay -f mpjpeg -\n"
+        "  --no-stream             Force file mode even when stdin/stdout are piped\n"
+        "                          Stream mode is detected automatically when stdin is piped.\n"
+        "                          Read MJPEG from stdin, draw X-MV-* annotations, write MJPEG to stdout\n"
+        "                          Terminal stage in a pipeline: ... | overlay | ffplay -f mpjpeg -\n"
         "  --show-labels           Draw visible text labels on bounding boxes and polygons\n"
     );
 }
@@ -32,7 +35,7 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
     NSString *inputPath  = nil;
     NSString *output     = nil;
     NSString *jsonOutput = nil;
-    BOOL stream      = NO;
+    BOOL noStream    = NO;
     BOOL showLabels  = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
@@ -43,10 +46,13 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--input"] && i+1 < (NSInteger)args.count)            { inputPath  = args[++i]; }
         else if ([a isEqualToString:@"--output"] && i+1 < (NSInteger)args.count)           { output     = args[++i]; }
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput = args[++i]; }
-        else if ([a isEqualToString:@"--stream"])      { stream     = YES; }
-        else if ([a isEqualToString:@"--show-labels"]) { showLabels = YES; }
+        else if ([a isEqualToString:@"--no-stream"])   { noStream   = YES; }
+        else if ([a isEqualToString:@"--show-labels"]) { showLabels  = YES; }
+        else if ([a isEqualToString:@"--stream"]) {
+            // deprecated: stream is now auto-detected
+            fprintf(stderr, "warning: --stream is deprecated; stream mode is now detected automatically\n");
+        }
         else {
-            fprintf(stderr, "overlay: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"overlay: unknown option '%@'", a]}];
@@ -62,6 +68,10 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
     else if (jsonOutput.length && isDir(jsonOutput))    resolvedJSON = [jsonOutput stringByAppendingPathComponent:jsonName];
     else if (output.length && isDir(output))            resolvedJSON = [output stringByAppendingPathComponent:jsonName];
     else if ([output.pathExtension.lowercaseString isEqualToString:@"json"]) resolvedJSON = output;
+
+    // Auto-detect stream mode: active when stdin is piped and --no-stream not set
+    BOOL stdinPiped = !isatty(STDIN_FILENO);
+    BOOL stream     = !noStream && stdinPiped;
 
     OverlayProcessor *p = [[OverlayProcessor alloc] init];
     p.jsonPath    = jsonPath;

@@ -72,7 +72,6 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--sidecars"])     { sidecars    = YES; }
         else if ([a isEqualToString:@"--debug"])        { debug       = YES; }
         else {
-            fprintf(stderr, "imagetransfer: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"imagetransfer: unknown option '%@'", a]}];

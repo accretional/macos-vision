@@ -21,7 +21,8 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
 // ── public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    if (self.stream) return [self runStreamWithError:error];
+    if (self.stream)    return [self runStreamWithError:error];       // S→S or S→F
+    if (self.streamOut) return [self runFileToStreamWithError:error]; // F→S
     if (self.lang) {
         NSArray<NSString *> *languages = [self supportedLanguages];
         fprintf(stderr, "Supported recognition languages:\n");
@@ -54,11 +55,64 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
+// ── F→S mode: file input → single MJPEG frame out ────────────────────────────
+
+- (BOOL)runFileToStreamWithError:(NSError **)error {
+    if (!self.inputPath.length) {
+        if (error) *error = [NSError errorWithDomain:OCRErrorDomain code:OCRErrorMissingInput
+                            userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
+        return NO;
+    }
+
+    CGImageSourceRef src = CGImageSourceCreateWithURL(
+        (__bridge CFURLRef)[NSURL fileURLWithPath:self.inputPath], nil);
+    CGImageRef cg = src ? CGImageSourceCreateImageAtIndex(src, 0, nil) : NULL;
+    if (src) CFRelease(src);
+    if (!cg) {
+        if (error) *error = [NSError errorWithDomain:OCRErrorDomain code:OCRErrorImageLoadFailed
+                            userInfo:@{NSLocalizedDescriptionKey:
+                                [NSString stringWithFormat:@"Failed to load image: %@", self.inputPath]}];
+        return NO;
+    }
+
+    NSMutableDictionary<NSString *, NSString *> *headers = [NSMutableDictionary dictionary];
+    NSDictionary *result = [self recognizeFromCGImage:cg error:nil];
+    CGImageRelease(cg);
+    if (result) {
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        if (jsonData)
+            headers[@"X-MV-ocr-recognize"] = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    }
+
+    // Encode to JPEG for the MJPEG frame
+    NSData *jpegData = nil;
+    NSString *ext = self.inputPath.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])
+        jpegData = [NSData dataWithContentsOfFile:self.inputPath];
+    if (!jpegData) {
+        NSImage *img = [[NSImage alloc] initWithContentsOfFile:self.inputPath];
+        NSBitmapImageRep *rep = img ? [[NSBitmapImageRep alloc] initWithData:[img TIFFRepresentation]] : nil;
+        jpegData = [rep representationUsingType:NSBitmapImageFileTypeJPEG
+                                     properties:@{NSImageCompressionFactor: @0.85}];
+    }
+    if (!jpegData) {
+        if (error) *error = [NSError errorWithDomain:OCRErrorDomain code:OCRErrorImageConversionFailed
+                            userInfo:@{NSLocalizedDescriptionKey: @"Failed to encode image as JPEG for stream"}];
+        return NO;
+    }
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+    [writer writeFrame:jpegData extraHeaders:headers];
+    return YES;
+}
+
 // ── stream mode ───────────────────────────────────────────────────────────────
 
 - (BOOL)runStreamWithError:(NSError **)error {
     MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
     MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
 
     [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
         CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
@@ -170,24 +224,24 @@ typedef NS_ENUM(NSInteger, OCRErrorCode) {
 // ── OCR core ──────────────────────────────────────────────────────────────────
 
 - (nullable NSDictionary *)recognitionResultFromImage:(NSString *)imagePath error:(NSError **)error {
-    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
-    if (!image) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:imagePath]) {
         if (error) {
             *error = [NSError errorWithDomain:OCRErrorDomain
                                          code:OCRErrorImageLoadFailed
                                      userInfo:@{NSLocalizedDescriptionKey:
-                                                    [NSString stringWithFormat:@"Failed to load image: %@", imagePath]}];
+                                                    [NSString stringWithFormat:@"File not found: %@", imagePath]}];
         }
         return nil;
     }
 
-    CGImageRef cgImage = [image CGImageForProposedRect:nil context:nil hints:nil];
+    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
+    CGImageRef cgImage = image ? [image CGImageForProposedRect:nil context:nil hints:nil] : NULL;
     if (!cgImage) {
         if (error) {
             *error = [NSError errorWithDomain:OCRErrorDomain
                                          code:OCRErrorImageConversionFailed
                                      userInfo:@{NSLocalizedDescriptionKey:
-                                                    [NSString stringWithFormat:@"Failed to convert image: %@", imagePath]}];
+                                                    [NSString stringWithFormat:@"Failed to load image (unsupported format?): %@", imagePath]}];
         }
         return nil;
     }

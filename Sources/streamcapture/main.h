@@ -28,8 +28,19 @@ NS_ASSUME_NONNULL_BEGIN
 /// Show a live preview window before capture (photo, video, screen-record).
 @property (nonatomic, assign) BOOL preview;
 @property (nonatomic, assign) BOOL debug;
-/// Stream video frames as MJPEG to stdout (only valid with --operation video).
+/// Stream frames as MJPEG (video) or MVAU (audio) to stdout.
+/// Auto-detected when stdout is piped; set by dispatch.m.
 @property (nonatomic, assign) BOOL stream;
+/// Target frames per second for MJPEG video stream (default: 30).
+@property (nonatomic, assign) NSInteger fps;
+/// JPEG quality for MJPEG stream (default: 0.85).
+@property (nonatomic, assign) double jpegQuality;
+/// Audio sample rate for MVAU audio stream (default: 16000).
+@property (nonatomic, assign) uint32_t audioSampleRate;
+/// Audio channel count for MVAU audio stream (default: 1).
+@property (nonatomic, assign) uint8_t audioChannels;
+/// Audio bit depth for MVAU audio stream (default: 16).
+@property (nonatomic, assign) uint8_t audioBitDepth;
 
 - (BOOL)runWithError:(NSError **)error;
 

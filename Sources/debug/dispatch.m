@@ -36,7 +36,6 @@ BOOL MVDispatchDebug(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--output"] && i+1 < (NSInteger)args.count)           { output     = args[++i]; }
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput = args[++i]; }
         else {
-            fprintf(stderr, "debug: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"debug: unknown option '%@'", a]}];

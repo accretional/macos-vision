@@ -104,7 +104,6 @@ BOOL MVDispatchAV(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--audio-only"])                                       { audioOnly    = YES; }
         else if ([a isEqualToString:@"--debug"])                                            { debug        = YES; }
         else {
-            fprintf(stderr, "av: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"av: unknown option '%@'", a]}];
@@ -142,8 +141,9 @@ BOOL MVDispatchAV(NSArray<NSString *> *args, NSError **error) {
         }
     }
 
-    // AV uses a single output property for both media and JSON
-    p.output = output.length ? output : jsonOutput;
+    // AV uses separate properties for media output and JSON envelope output
+    p.mediaOutput = output;
+    p.jsonOutput  = jsonOutput;
 
     return [p runWithError:error];
 }

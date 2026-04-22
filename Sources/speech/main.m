@@ -1,6 +1,8 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVAudioStream.h"
 #import <Speech/Speech.h>
+#import <AVFoundation/AVFoundation.h>
 
 static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
 
@@ -8,8 +10,11 @@ static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
 
 - (instancetype)init {
     if (self = [super init]) {
-        _operation = @"transcribe";
-        _lang      = @"en-US";
+        _operation  = @"transcribe";
+        _lang       = @"en-US";
+        _sampleRate = 16000;
+        _channels   = 1;
+        _bitDepth   = 16;
     }
     return self;
 }
@@ -39,10 +44,13 @@ static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
         return MVEmitEnvelope(envelope, self.jsonOutput, error);
     }
 
+    // Stream-in mode: read audio from stdin
+    if (self.streamIn) return [self runAudioStreamWithError:error];
+
     if (!self.inputPath.length) {
         if (error) {
             *error = [NSError errorWithDomain:SpeechErrorDomain code:2
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <audio_file>"}];
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <audio_file> (stdin piped enables stream mode automatically)"}];
         }
         return NO;
     }
@@ -354,6 +362,84 @@ static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
         result[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
     }
     return result;
+}
+
+// ── MVAU stream-in mode ───────────────────────────────────────────────────────
+
+- (BOOL)runAudioStreamWithError:(NSError **)error {
+    // Set up fallback format from properties
+    MVAudioFormat fallback;
+    fallback.sampleRate = self.sampleRate > 0 ? self.sampleRate : 16000;
+    fallback.channels   = self.channels   > 0 ? self.channels   : 1;
+    fallback.bitDepth   = self.bitDepth   > 0 ? self.bitDepth   : 16;
+
+    MVAudioReader *reader = [[MVAudioReader alloc] initWithFileDescriptor:STDIN_FILENO
+                                                            fallbackFormat:fallback];
+
+    // If noHeader is set, we already used fallback. Read all audio data.
+    NSError *readErr = nil;
+    NSData *pcmData = [reader readAllData:&readErr];
+    if (!pcmData || pcmData.length == 0) {
+        if (error) *error = readErr ?: [NSError errorWithDomain:SpeechErrorDomain code:10
+                                          userInfo:@{NSLocalizedDescriptionKey: @"No audio data received from stdin"}];
+        return NO;
+    }
+
+    MVAudioFormat fmt = reader.format;
+
+    // Write PCM data to a temp WAV file for SFSpeechRecognizer
+    NSString *tmpName = [[NSUUID UUID].UUIDString stringByAppendingPathExtension:@"wav"];
+    NSURL *tmpWav = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:tmpName]];
+
+    NSDictionary *wavSettings = @{
+        AVFormatIDKey:             @(kAudioFormatLinearPCM),
+        AVSampleRateKey:           @(fmt.sampleRate),
+        AVNumberOfChannelsKey:     @(fmt.channels),
+        AVLinearPCMBitDepthKey:    @(fmt.bitDepth),
+        AVLinearPCMIsFloatKey:     @NO,
+        AVLinearPCMIsBigEndianKey: @NO,
+    };
+    NSError *wavErr = nil;
+    AVAudioFile *wavFile = [[AVAudioFile alloc] initForWriting:tmpWav settings:wavSettings error:&wavErr];
+    if (!wavFile) { if (error) *error = wavErr; return NO; }
+
+    // Write raw PCM bytes as an AVAudioPCMBuffer
+    AVAudioFormat *avFmt = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
+                                                            sampleRate:(double)fmt.sampleRate
+                                                              channels:(AVAudioChannelCount)fmt.channels
+                                                           interleaved:YES];
+    if (!avFmt) {
+        if (error) *error = [NSError errorWithDomain:SpeechErrorDomain code:11
+                             userInfo:@{NSLocalizedDescriptionKey: @"Could not create AVAudioFormat for PCM data"}];
+        [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+        return NO;
+    }
+    AVAudioFrameCount frameCount = (AVAudioFrameCount)(pcmData.length / (fmt.channels * (fmt.bitDepth / 8)));
+    AVAudioPCMBuffer *pcmBuf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:avFmt frameCapacity:frameCount];
+    pcmBuf.frameLength = frameCount;
+    memcpy(pcmBuf.int16ChannelData[0], pcmData.bytes, pcmData.length);
+
+    NSError *writeErr = nil;
+    if (![wavFile writeFromBuffer:pcmBuf error:&writeErr]) {
+        if (error) *error = writeErr;
+        [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+        return NO;
+    }
+    wavFile = nil; // close file
+
+    // Run recognition on the temp WAV file
+    NSDictionary *result = [self transcribeURL:tmpWav error:error];
+    [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+    if (!result) return NO;
+
+    NSMutableDictionary *mResult = [result mutableCopy];
+    mResult[@"source"] = @"stdin";
+    mResult[@"sampleRate"] = @(fmt.sampleRate);
+    mResult[@"channels"] = @(fmt.channels);
+    mResult[@"hadMVAUHeader"] = @(reader.hasMVAUHeader);
+
+    NSDictionary *envelope = MVMakeEnvelope(@"speech", self.operation, @"stdin", mResult);
+    return MVEmitEnvelope(envelope, self.jsonOutput, error);
 }
 
 @end

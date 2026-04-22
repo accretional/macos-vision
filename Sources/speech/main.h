@@ -4,7 +4,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface SpeechProcessor : NSObject
 
-/// Audio file path (required for transcribe and voice-analytics).
+/// Audio file path (required for transcribe and voice-analytics, or use streamIn).
 @property (nonatomic, copy, nullable) NSString *inputPath;
 /// JSON envelope output path, or stdout when omitted.
 @property (nonatomic, copy, nullable) NSString *jsonOutput;
@@ -13,6 +13,16 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *lang;
 @property (nonatomic, assign) BOOL offline;
 @property (nonatomic, assign) BOOL debug;
+/// Read raw PCM/MVAU audio from stdin and transcribe (auto-detected when stdin is piped).
+@property (nonatomic, assign) BOOL streamIn;
+/// Sample rate for raw PCM fallback when no MVAU header detected (default: 16000).
+@property (nonatomic, assign) uint32_t sampleRate;
+/// Channel count for raw PCM fallback (default: 1).
+@property (nonatomic, assign) uint8_t  channels;
+/// Bit depth for raw PCM fallback (default: 16).
+@property (nonatomic, assign) uint8_t  bitDepth;
+/// Force raw PCM mode, ignoring any MVAU header (default: NO).
+@property (nonatomic, assign) BOOL     noHeader;
 
 - (BOOL)runWithError:(NSError **)error;
 

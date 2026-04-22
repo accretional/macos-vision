@@ -1,5 +1,6 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <Cocoa/Cocoa.h>
 #import <Vision/Vision.h>
 #import <CoreImage/CoreImage.h>
@@ -20,6 +21,14 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
 // ── public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
+    if (self.streamOut && !self.stream) return [self runFileToStreamWithError:error]; // F→S
+    if (self.stream) {
+        // S→S / S→F not yet implemented for segment
+        if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorMissingInput
+                            userInfo:@{NSLocalizedDescriptionKey:
+                                @"segment does not support MJPEG stream input; use --input <image> or --no-stream"}];
+        return NO;
+    }
     NSString *op = self.operation.length ? self.operation : @"foreground-mask";
     if (!self.inputPath.length) {
         if (error) {
@@ -30,6 +39,73 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
         return NO;
     }
     return [self processImage:self.inputPath operation:op error:error];
+}
+
+// ── F→S mode: file input → single MJPEG frame out ────────────────────────────
+
+- (BOOL)runFileToStreamWithError:(NSError **)error {
+    NSString *op = self.operation.length ? self.operation : @"foreground-mask";
+    if (!self.inputPath.length) {
+        if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorMissingInput
+                            userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
+        return NO;
+    }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (self.artifactsDir.length && ![fm fileExistsAtPath:self.artifactsDir]) {
+        if (![fm createDirectoryAtPath:self.artifactsDir withIntermediateDirectories:YES attributes:nil error:error])
+            return NO;
+    }
+
+    NSString *base = [self.inputPath.lastPathComponent stringByDeletingPathExtension];
+    NSMutableArray<NSDictionary *> *artifactPaths = [NSMutableArray array];
+    BOOL ok = NO;
+    if ([op isEqualToString:@"foreground-mask"])
+        ok = [self runForegroundMask:self.inputPath base:base artifactPaths:artifactPaths error:error];
+    else if ([op isEqualToString:@"person-mask"])
+        ok = [self runPersonMask:self.inputPath base:base artifactPaths:artifactPaths error:error];
+    else if ([op isEqualToString:@"person-segment"])
+        ok = [self runPersonSegment:self.inputPath base:base artifactPaths:artifactPaths error:error];
+    else if ([op isEqualToString:@"attention-saliency"])
+        ok = [self runAttentionSaliency:self.inputPath base:base artifactPaths:artifactPaths error:error];
+    else if ([op isEqualToString:@"objectness-saliency"])
+        ok = [self runObjectnessSaliency:self.inputPath base:base artifactPaths:artifactPaths error:error];
+    else {
+        if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorMissingInput
+                            userInfo:@{NSLocalizedDescriptionKey:
+                                           [NSString stringWithFormat:@"Unknown operation '%@'", op]}];
+        return NO;
+    }
+    if (!ok) return NO;
+
+    NSDictionary *result = @{ @"operation": op, @"artifacts": artifactPaths };
+    NSDictionary *envelope = MVMakeEnvelope(@"segment", op, self.inputPath, result);
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:envelope options:0 error:nil];
+    NSString *jsonStr = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"{}";
+
+    if (self.jsonOutput.length) MVEmitEnvelope(envelope, self.jsonOutput, nil);
+
+    // Encode original image as JPEG for the MJPEG frame
+    NSData *jpegData = nil;
+    NSString *ext = self.inputPath.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])
+        jpegData = [NSData dataWithContentsOfFile:self.inputPath];
+    if (!jpegData) {
+        NSImage *img = [[NSImage alloc] initWithContentsOfFile:self.inputPath];
+        NSBitmapImageRep *rep = img ? [[NSBitmapImageRep alloc] initWithData:[img TIFFRepresentation]] : nil;
+        jpegData = [rep representationUsingType:NSBitmapImageFileTypeJPEG
+                                     properties:@{NSImageCompressionFactor: @0.85}];
+    }
+    if (!jpegData) {
+        if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorEncodeFailed
+                            userInfo:@{NSLocalizedDescriptionKey: @"Failed to encode image as JPEG for stream"}];
+        return NO;
+    }
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+    [writer writeFrame:jpegData extraHeaders:@{ [NSString stringWithFormat:@"X-MV-segment-%@", op]: jsonStr }];
+    return YES;
 }
 
 - (BOOL)processImage:(NSString *)imagePath operation:(NSString *)op error:(NSError **)error {
@@ -286,18 +362,18 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 - (nullable CGImageRef)loadCGImage:(NSString *)imagePath error:(NSError **)error {
-    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
-    if (!image) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:imagePath]) {
         if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorImageLoadFailed
                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                           [NSString stringWithFormat:@"Failed to load image: %@", imagePath]}];
+                                                           [NSString stringWithFormat:@"File not found: %@", imagePath]}];
         return NULL;
     }
-    CGImageRef cg = [image CGImageForProposedRect:nil context:nil hints:nil];
+    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
+    CGImageRef cg = image ? [image CGImageForProposedRect:nil context:nil hints:nil] : NULL;
     if (!cg) {
         if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorImageLoadFailed
                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                           [NSString stringWithFormat:@"Failed to convert image: %@", imagePath]}];
+                                                           [NSString stringWithFormat:@"Failed to load image (unsupported format?): %@", imagePath]}];
         return NULL;
     }
     CGImageRetain(cg);

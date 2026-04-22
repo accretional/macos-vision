@@ -1,4 +1,5 @@
 #import "segment/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -29,6 +30,7 @@ static void printHelp(void) {
         "  --output <path>         Output mask image file, directory, or .json path\n"
         "  --json-output <path>    Write JSON envelope to this file (default: stdout)\n"
         "  --artifacts-dir <dir>   Write mask images here\n"
+        "  --no-stream             Force file mode even when stdin is piped (future stream mode)\n"
     );
 }
 
@@ -38,6 +40,7 @@ BOOL MVDispatchSegment(NSArray<NSString *> *args, NSError **error) {
     NSString *output       = nil;
     NSString *jsonOutput   = nil;
     NSString *artifactsDir = nil;
+    BOOL noStream          = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -48,8 +51,11 @@ BOOL MVDispatchSegment(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--output"] && i+1 < (NSInteger)args.count)           { output       = args[++i]; }
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput   = args[++i]; }
         else if ([a isEqualToString:@"--artifacts-dir"] && i+1 < (NSInteger)args.count)    { artifactsDir = args[++i]; }
+        else if ([a isEqualToString:@"--no-stream"]) { noStream = YES; }
+        else if ([a isEqualToString:@"--stream"]) {
+            fprintf(stderr, "warning: --stream is deprecated; stream mode is now detected automatically\n");
+        }
         else {
-            fprintf(stderr, "segment: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"segment: unknown option '%@'", a]}];
@@ -74,11 +80,19 @@ BOOL MVDispatchSegment(NSArray<NSString *> *args, NSError **error) {
     if (output.length && !isDir(output) && ![output.pathExtension.lowercaseString isEqualToString:@"json"])
         outputPath = output;
 
+    BOOL stdinPiped  = !isatty(STDIN_FILENO);
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    BOOL streamIn    = !noStream && stdinPiped && !inputPath.length;
+    BOOL streamOut   = !noStream && stdoutPiped;
+
     SegmentProcessor *p = [[SegmentProcessor alloc] init];
     p.inputPath    = inputPath;
     p.jsonOutput   = resolvedJSON;
     p.artifactsDir = resolvedArtifacts;
     p.outputPath   = outputPath;
     p.operation    = operation;
+    p.stream       = streamIn;
+    p.streamOut    = streamOut;
+    if ((streamIn || streamOut) && output.length) p.ndjsonOutput = output;
     return [p runWithError:error];
 }

@@ -67,7 +67,9 @@ static NSString *extensionForFormat(NSString *fmt) {
 // ── public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    if (self.stream) return [self runStreamWithError:error];
+    if (self.stream)    return [self runStreamWithError:error];       // S→S or S→F
+    if (self.streamOut) return [self runFileToStreamWithError:error]; // F→S
+    // F→F file mode
     NSString *op = self.operation.length ? self.operation : @"classify";
     if (!self.inputPath.length) {
         if (error) {
@@ -77,6 +79,57 @@ static NSString *extensionForFormat(NSString *fmt) {
         return NO;
     }
     return [self processImage:self.inputPath operation:op error:error];
+}
+
+// ── F→S mode: file input → single MJPEG frame out ────────────────────────────
+
+- (BOOL)runFileToStreamWithError:(NSError **)error {
+    NSString *op = self.operation.length ? self.operation : @"classify";
+    if (!self.inputPath.length) {
+        if (error) *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorMissingInput
+                            userInfo:@{NSLocalizedDescriptionKey: @"Provide --input <image>"}];
+        return NO;
+    }
+
+    NSImage *image = [[NSImage alloc] initWithContentsOfFile:self.inputPath];
+    CGImageRef cg = image ? [image CGImageForProposedRect:nil context:nil hints:nil] : NULL;
+    if (!cg) {
+        if (error) *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorImageLoadFailed
+                            userInfo:@{NSLocalizedDescriptionKey:
+                                [NSString stringWithFormat:@"Failed to load image: %@", self.inputPath]}];
+        return NO;
+    }
+
+    NSMutableDictionary<NSString *, NSString *> *headers = [NSMutableDictionary dictionary];
+    NSDictionary *result = [self detectCGImage:cg operation:op];
+    if (result) {
+        NSString *opSlug = [op stringByReplacingOccurrencesOfString:@"-" withString:@"_"];
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        if (jsonData)
+            headers[[NSString stringWithFormat:@"X-MV-classify-%@", opSlug]] =
+                [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+    }
+
+    // Encode to JPEG for the MJPEG frame
+    NSData *jpegData = nil;
+    NSString *ext = self.inputPath.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"])
+        jpegData = [NSData dataWithContentsOfFile:self.inputPath];
+    if (!jpegData) {
+        NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithData:[image TIFFRepresentation]];
+        jpegData = [rep representationUsingType:NSBitmapImageFileTypeJPEG
+                                     properties:@{NSImageCompressionFactor: @0.85}];
+    }
+    if (!jpegData) {
+        if (error) *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorEncodeFailed
+                            userInfo:@{NSLocalizedDescriptionKey: @"Failed to encode image as JPEG for stream"}];
+        return NO;
+    }
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+    [writer writeFrame:jpegData extraHeaders:headers];
+    return YES;
 }
 
 - (BOOL)processImage:(NSString *)imagePath operation:(NSString *)op error:(NSError **)error {
@@ -107,6 +160,7 @@ static NSString *extensionForFormat(NSString *fmt) {
 
     MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
     MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
 
     [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
         CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
@@ -536,18 +590,18 @@ static NSString *extensionForFormat(NSString *fmt) {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 - (nullable CGImageRef)loadCGImage:(NSString *)imagePath error:(NSError **)error {
-    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
-    if (!image) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:imagePath]) {
         if (error) *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorImageLoadFailed
                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                [NSString stringWithFormat:@"Failed to load image: %@", imagePath]}];
+                                                [NSString stringWithFormat:@"File not found: %@", imagePath]}];
         return NULL;
     }
-    CGImageRef cg = [image CGImageForProposedRect:nil context:nil hints:nil];
+    NSImage *image = [[NSImage alloc] initByReferencingFile:imagePath];
+    CGImageRef cg = image ? [image CGImageForProposedRect:nil context:nil hints:nil] : NULL;
     if (!cg) {
         if (error) *error = [NSError errorWithDomain:ClassifyErrorDomain code:ClassifyErrorImageLoadFailed
                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                [NSString stringWithFormat:@"Failed to convert image: %@", imagePath]}];
+                                                [NSString stringWithFormat:@"Failed to load image (unsupported format?): %@", imagePath]}];
         return NULL;
     }
     CGImageRetain(cg);

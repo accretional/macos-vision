@@ -1,4 +1,5 @@
 #import "classify/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -33,8 +34,9 @@ static void printHelp(void) {
         "  --artifacts-dir <dir>   Write debug overlay images here (requires --debug)\n"
         "  --boxes-format <fmt>    Overlay image format: png (default), jpg, tiff, bmp, gif\n"
         "  --debug                 Draw detection boxes and write overlay image\n"
-        "  --stream                Read MJPEG from stdin, annotate each frame, write MJPEG to stdout\n"
-        "                          Adds X-MV-classify-<op> header per frame; pipe from streamcapture --stream\n"
+        "  --no-stream             Force file mode even when stdin/stdout are piped\n"
+        "                          Stream mode is detected automatically when stdin is piped.\n"
+        "                          Adds X-MV-classify-<op> header per frame; pipe from streamcapture\n"
     );
 }
 
@@ -45,7 +47,7 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
     NSString *jsonOutput   = nil;
     NSString *artifactsDir = nil;
     NSString *boxesFormat  = @"png";
-    BOOL debug = NO, stream = NO;
+    BOOL debug = NO, noStream = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -57,10 +59,13 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput   = args[++i]; }
         else if ([a isEqualToString:@"--artifacts-dir"] && i+1 < (NSInteger)args.count)    { artifactsDir = args[++i]; }
         else if ([a isEqualToString:@"--boxes-format"] && i+1 < (NSInteger)args.count)     { boxesFormat  = args[++i]; }
-        else if ([a isEqualToString:@"--debug"])  { debug  = YES; }
-        else if ([a isEqualToString:@"--stream"]) { stream = YES; }
+        else if ([a isEqualToString:@"--debug"])     { debug    = YES; }
+        else if ([a isEqualToString:@"--no-stream"]) { noStream = YES; }
+        else if ([a isEqualToString:@"--stream"]) {
+            // deprecated: stream is now auto-detected
+            fprintf(stderr, "warning: --stream is deprecated; stream mode is now detected automatically\n");
+        }
         else {
-            fprintf(stderr, "classify: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"classify: unknown option '%@'", a]}];
@@ -70,9 +75,8 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
 
     NSArray<NSString *> *validBoxFmts = @[@"png", @"jpg", @"jpeg", @"tiff", @"tif", @"bmp", @"gif"];
     if (![validBoxFmts containsObject:boxesFormat.lowercaseString]) {
-        fprintf(stderr, "classify: unsupported --boxes-format '%s'\n", boxesFormat.UTF8String);
         if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
-            userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"classify: unsupported --boxes-format '%@'", boxesFormat]}];
+            userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"classify: unsupported --boxes-format '%@'. Valid: png, jpg, tiff, bmp, gif", boxesFormat]}];
         return NO;
     }
 
@@ -87,6 +91,13 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
 
     NSString *resolvedArtifacts = artifactsDir.length ? artifactsDir : (isDir(output) ? output : nil);
 
+    // streamIn (S→S / S→F): stdin piped AND no explicit --input → read MJPEG from stdin.
+    // streamOut (F→S / S→S): stdout piped → write MJPEG to stdout.
+    BOOL stdinPiped  = !isatty(STDIN_FILENO);
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    BOOL streamIn    = !noStream && stdinPiped && !inputPath.length;
+    BOOL streamOut   = !noStream && stdoutPiped;
+
     ClassifyProcessor *p = [[ClassifyProcessor alloc] init];
     p.inputPath    = inputPath;
     p.jsonOutput   = resolvedJSON;
@@ -94,6 +105,13 @@ BOOL MVDispatchClassify(NSArray<NSString *> *args, NSError **error) {
     p.debug        = debug;
     p.boxesFormat  = boxesFormat;
     p.operation    = operation;
-    p.stream       = stream;
+    p.stream       = streamIn;
+    p.streamOut    = streamOut;
+
+    // Dual-write: in stream mode with --output set, write NDJSON to that file
+    if ((p.stream || p.streamOut) && output.length) {
+        p.ndjsonOutput = output;
+    }
+
     return [p runWithError:error];
 }

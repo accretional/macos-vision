@@ -7,7 +7,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *video;
 @property (nonatomic, copy, nullable) NSString *img;
 @property (nonatomic, copy) NSString *operation;
-@property (nonatomic, copy, nullable) NSString *output;
+@property (nonatomic, copy, nullable) NSString *mediaOutput;  // output media file path (encode, frames, tts, etc.)
+@property (nonatomic, copy, nullable) NSString *jsonOutput;   // JSON envelope output path
 @property (nonatomic, copy, nullable) NSString *artifactsDir;
 @property (nonatomic, copy, nullable) NSString *preset;
 @property (nonatomic, copy, nullable) NSString *timeStr;

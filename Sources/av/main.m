@@ -301,7 +301,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
     NSDictionary *merged = MVResultByMergingArtifacts(root, MAVCollectArtifacts(root));
     NSString *inp = self.video.length ? self.video : nil;
     NSDictionary *env = MVMakeEnvelope(@"av", @"presets", inp, merged);
-    return MVEmitEnvelope(env, self.output.length ? self.output : nil, error);
+    return MVEmitEnvelope(env, self.jsonOutput.length ? self.jsonOutput : nil, error);
 }
 
 // ── probe ─────────────────────────────────────────────────────────────────────
@@ -451,8 +451,8 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
     BOOL isMulti = self.timesStr.length > 0;
     NSURL *singleOutURL = nil;
     NSURL *destDir = nil;
-    if (!isMulti && self.output.length) {
-        singleOutURL = [NSURL fileURLWithPath:self.output];
+    if (!isMulti && self.mediaOutput.length) {
+        singleOutURL = [NSURL fileURLWithPath:self.mediaOutput];
         [[NSFileManager defaultManager] createDirectoryAtURL:singleOutURL.URLByDeletingLastPathComponent
                                  withIntermediateDirectories:YES attributes:nil error:nil];
     } else {
@@ -506,8 +506,8 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
         return NO;
     }
     NSURL *outURL;
-    if (self.output.length) {
-        outURL = [NSURL fileURLWithPath:self.output];
+    if (self.mediaOutput.length) {
+        outURL = [NSURL fileURLWithPath:self.mediaOutput];
     } else {
         NSURL *destDir = self.artifactsDir.length
             ? [NSURL fileURLWithPath:self.artifactsDir]
@@ -536,9 +536,8 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
     if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
     NSDictionary *merged = MVResultByMergingArtifacts(out, MAVCollectArtifacts(out));
     NSDictionary *env = MVMakeEnvelope(@"av", @"frames", imgURL.path, merged);
-    if (self.output.length) {
-        NSString *jsonPath = [[self.output stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
-        return MVEmitEnvelope(env, jsonPath, error);
+    if (self.jsonOutput.length) {
+        return MVEmitEnvelope(env, self.jsonOutput, error);
     }
     return MVEmitEnvelope(env, nil, error);
 }
@@ -554,7 +553,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
                                             [NSString stringWithFormat:@"Unknown preset '%@'. Use low|medium|high|hevc-1080p|hevc-4k|prores-422|prores-4444|m4a|passthrough", presetName]}];
         return NO;
     }
-    if (!self.output.length) {
+    if (!self.mediaOutput.length) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
                              userInfo:@{NSLocalizedDescriptionKey: @"encode requires --output"}];
         return NO;
@@ -574,7 +573,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
                              userInfo:@{NSLocalizedDescriptionKey: @"Could not create export session"}];
         return NO;
     }
-    NSURL *outputURL = [NSURL fileURLWithPath:self.output];
+    NSURL *outputURL = [NSURL fileURLWithPath:self.mediaOutput];
     [[NSFileManager defaultManager] removeItemAtURL:outputURL error:nil];
     session.outputURL = outputURL;
     NSString *fileType = session.supportedFileTypes.firstObject;
@@ -599,7 +598,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
 
     NSMutableDictionary *out = [@{
         @"operation": @"encode",
-        @"output": MVRelativePath(self.output),
+        @"output": MVRelativePath(self.mediaOutput),
         @"preset": presetName,
     } mutableCopy];
     if (self.audioOnly) out[@"audioOnly"] = @YES;
@@ -616,7 +615,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
                              userInfo:@{NSLocalizedDescriptionKey: @"concat requires --videos <path1,path2,...>"}];
         return NO;
     }
-    if (!self.output.length) {
+    if (!self.mediaOutput.length) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
                              userInfo:@{NSLocalizedDescriptionKey: @"concat requires --output"}];
         return NO;
@@ -657,7 +656,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
                              userInfo:@{NSLocalizedDescriptionKey: @"Could not create export session for concat"}];
         return NO;
     }
-    NSURL *outURL = [NSURL fileURLWithPath:self.output];
+    NSURL *outURL = [NSURL fileURLWithPath:self.mediaOutput];
     [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
                                  withIntermediateDirectories:YES attributes:nil error:nil];
     [[NSFileManager defaultManager] removeItemAtURL:outURL error:nil];
@@ -668,7 +667,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
 
     NSMutableDictionary *out = [@{
         @"operation": @"concat",
-        @"output": MVRelativePath(self.output),
+        @"output": MVRelativePath(self.mediaOutput),
         @"inputCount": @(assets.count),
         @"durationSeconds": @(CMTimeGetSeconds(comp.duration)),
     } mutableCopy];
@@ -769,7 +768,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
                              userInfo:@{NSLocalizedDescriptionKey: @"tts requires --text or --input"}];
         return NO;
     }
-    if (!self.output.length) {
+    if (!self.mediaOutput.length) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
                              userInfo:@{NSLocalizedDescriptionKey: @"tts requires --output"}];
         return NO;
@@ -810,7 +809,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
         return NO;
     }
 
-    NSString *mediaPath = self.output;
+    NSString *mediaPath = self.mediaOutput;
     NSString *ext = mediaPath.pathExtension.lowercaseString;
     if (!ext.length) { mediaPath = [mediaPath stringByAppendingPathExtension:@"m4a"]; ext = @"m4a"; }
     else if ([ext isEqualToString:@"caf"]) {
@@ -1071,8 +1070,8 @@ static NSString *MAVFrequencyToNote(float freq) {
     NSString *srcBase = asset.URL.lastPathComponent.stringByDeletingPathExtension ?: @"audio";
     NSString *outName = [NSString stringWithFormat:@"stems_%@.m4a", srcBase];
     NSURL *outURL;
-    if (self.output.length) {
-        outURL = [NSURL fileURLWithPath:self.output];
+    if (self.mediaOutput.length) {
+        outURL = [NSURL fileURLWithPath:self.mediaOutput];
     } else if (self.artifactsDir.length) {
         outURL = [[NSURL fileURLWithPath:self.artifactsDir] URLByAppendingPathComponent:outName];
     } else {
@@ -1161,7 +1160,7 @@ static NSString *MAVFrequencyToNote(float freq) {
     }
     [points addObject:@(CMTimeGetSeconds(asset.duration))];
 
-    NSString *outDir = self.output.length ? self.output
+    NSString *outDir = self.mediaOutput.length ? self.mediaOutput
                      : (self.artifactsDir.length ? self.artifactsDir
                      : [[NSFileManager defaultManager] currentDirectoryPath]);
     [[NSFileManager defaultManager] createDirectoryAtPath:outDir
@@ -1221,7 +1220,7 @@ static NSString *MAVFrequencyToNote(float freq) {
                              userInfo:@{NSLocalizedDescriptionKey: @"mix requires --inputs <path1,path2,...>"}];
         return NO;
     }
-    if (!self.output.length) {
+    if (!self.mediaOutput.length) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
                              userInfo:@{NSLocalizedDescriptionKey: @"mix requires --output"}];
         return NO;
@@ -1270,7 +1269,7 @@ static NSString *MAVFrequencyToNote(float freq) {
     AVMutableAudioMix *audioMix = [AVMutableAudioMix audioMix];
     audioMix.inputParameters = mixParams;
 
-    NSURL *outURL = [NSURL fileURLWithPath:self.output];
+    NSURL *outURL = [NSURL fileURLWithPath:self.mediaOutput];
     [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
                                  withIntermediateDirectories:YES attributes:nil error:nil];
     [[NSFileManager defaultManager] removeItemAtURL:outURL error:nil];
@@ -1290,7 +1289,7 @@ static NSString *MAVFrequencyToNote(float freq) {
 
     NSMutableDictionary *out = [@{
         @"operation": @"mix",
-        @"output": MVRelativePath(self.output),
+        @"output": MVRelativePath(self.mediaOutput),
         @"inputCount": @(assets.count),
         @"durationSeconds": @(CMTimeGetSeconds(comp.duration)),
     } mutableCopy];
@@ -1306,7 +1305,7 @@ static NSString *MAVFrequencyToNote(float freq) {
                              userInfo:@{NSLocalizedDescriptionKey: @"burn requires --text or --overlay <image>"}];
         return NO;
     }
-    if (!self.output.length) {
+    if (!self.mediaOutput.length) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
                              userInfo:@{NSLocalizedDescriptionKey: @"burn requires --output"}];
         return NO;
@@ -1394,7 +1393,7 @@ static NSString *MAVFrequencyToNote(float freq) {
     instruction.layerInstructions = @[layerInstruction];
     videoComp.instructions = @[instruction];
 
-    NSURL *outURL = [NSURL fileURLWithPath:self.output];
+    NSURL *outURL = [NSURL fileURLWithPath:self.mediaOutput];
     [[NSFileManager defaultManager] removeItemAtURL:outURL error:nil];
 
     NSString *presetConst = MPresetConstant(self.preset ?: @"high") ?: AVAssetExportPresetHighestQuality;
@@ -1412,7 +1411,7 @@ static NSString *MAVFrequencyToNote(float freq) {
 
     NSMutableDictionary *out = [@{
         @"operation": @"burn",
-        @"output": MVRelativePath(self.output),
+        @"output": MVRelativePath(self.mediaOutput),
     } mutableCopy];
     if (self.text.length) out[@"text"] = self.text;
     if (self.overlayPath.length) out[@"overlay"] = MVRelativePath(self.overlayPath);
@@ -1428,7 +1427,7 @@ static NSString *MAVFrequencyToNote(float freq) {
                              userInfo:@{NSLocalizedDescriptionKey: @"fetch requires --input <url>"}];
         return NO;
     }
-    if (!self.output.length) {
+    if (!self.mediaOutput.length) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
                              userInfo:@{NSLocalizedDescriptionKey: @"fetch requires --output"}];
         return NO;
@@ -1446,7 +1445,7 @@ static NSString *MAVFrequencyToNote(float freq) {
                                             options:@{ AVURLAssetPreferPreciseDurationAndTimingKey: @YES }];
     MWaitAssetKeys(asset, @[@"tracks", @"duration"]);
 
-    NSURL *outURL = [NSURL fileURLWithPath:self.output];
+    NSURL *outURL = [NSURL fileURLWithPath:self.mediaOutput];
     [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
                                  withIntermediateDirectories:YES attributes:nil error:nil];
     [[NSFileManager defaultManager] removeItemAtURL:outURL error:nil];
@@ -1477,7 +1476,7 @@ static NSString *MAVFrequencyToNote(float freq) {
     NSMutableDictionary *out = [@{
         @"operation": @"fetch",
         @"source": self.inputFile,
-        @"output": MVRelativePath(self.output),
+        @"output": MVRelativePath(self.mediaOutput),
         @"durationSeconds": @(CMTimeGetSeconds(asset.duration)),
     } mutableCopy];
     if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
@@ -1492,7 +1491,7 @@ static NSString *MAVFrequencyToNote(float freq) {
                              userInfo:@{NSLocalizedDescriptionKey: @"retime requires --factor > 0 (e.g. 2.0 = 2x speed)"}];
         return NO;
     }
-    if (!self.output.length) {
+    if (!self.mediaOutput.length) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorExportRequired
                              userInfo:@{NSLocalizedDescriptionKey: @"retime requires --output"}];
         return NO;
@@ -1517,7 +1516,7 @@ static NSString *MAVFrequencyToNote(float freq) {
         [track scaleTimeRange:CMTimeRangeMake(kCMTimeZero, originalDuration) toDuration:newDuration];
     }
 
-    NSURL *outURL = [NSURL fileURLWithPath:self.output];
+    NSURL *outURL = [NSURL fileURLWithPath:self.mediaOutput];
     [[NSFileManager defaultManager] createDirectoryAtURL:outURL.URLByDeletingLastPathComponent
                                  withIntermediateDirectories:YES attributes:nil error:nil];
     [[NSFileManager defaultManager] removeItemAtURL:outURL error:nil];
@@ -1536,7 +1535,7 @@ static NSString *MAVFrequencyToNote(float freq) {
 
     NSMutableDictionary *out = [@{
         @"operation": @"retime",
-        @"output": MVRelativePath(self.output),
+        @"output": MVRelativePath(self.mediaOutput),
         @"factor": @(self.factor),
         @"originalDurationSeconds": @(CMTimeGetSeconds(originalDuration)),
         @"newDurationSeconds": @(newSeconds),
@@ -1553,10 +1552,15 @@ static NSString *MAVFrequencyToNote(float freq) {
     NSDictionary *merged = MVResultByMergingArtifacts(obj, MAVCollectArtifacts(obj));
     NSDictionary *env = MVMakeEnvelope(@"av", self.operation, inp.length ? inp : nil, merged);
 
-    // split: self.output is the segment directory — write JSON inside it
-    if ([self.operation isEqualToString:@"split"] && self.output.length) {
-        NSString *jsonPath = [self.output stringByAppendingPathComponent:@"split.json"];
+    // split: mediaOutput is the segment directory — write JSON inside it
+    if ([self.operation isEqualToString:@"split"] && self.mediaOutput.length) {
+        NSString *jsonPath = [self.mediaOutput stringByAppendingPathComponent:@"split.json"];
         return MVEmitEnvelope(env, jsonPath, error);
+    }
+
+    // If jsonOutput is explicitly set, use it
+    if (self.jsonOutput.length) {
+        return MVEmitEnvelope(env, self.jsonOutput, error);
     }
 
     // Operations that produce a media file: write JSON alongside it
@@ -1568,8 +1572,8 @@ static NSString *MAVFrequencyToNote(float freq) {
                          [self.operation isEqualToString:@"burn"] ||
                          [self.operation isEqualToString:@"fetch"] ||
                          [self.operation isEqualToString:@"retime"];
-    if (isMediaOutput && self.output) {
-        NSString *jsonPath = [[self.output stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
+    if (isMediaOutput && self.mediaOutput.length) {
+        NSString *jsonPath = [[self.mediaOutput stringByDeletingPathExtension] stringByAppendingPathExtension:@"json"];
         return MVEmitEnvelope(env, jsonPath, error);
     }
     if (self.artifactsDir.length) {
@@ -1579,7 +1583,6 @@ static NSString *MAVFrequencyToNote(float freq) {
             : [NSString stringWithFormat:@"%@.json", self.operation];
         return MVEmitEnvelope(env, [self.artifactsDir stringByAppendingPathComponent:base], error);
     }
-    if (self.output) return MVEmitEnvelope(env, self.output, error);
     return MVEmitEnvelope(env, nil, error);
 }
 
