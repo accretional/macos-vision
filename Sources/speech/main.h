@@ -23,6 +23,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) uint8_t  bitDepth;
 /// Force raw PCM mode, ignoring any MVAU header (default: NO).
 @property (nonatomic, assign) BOOL     noHeader;
+/// Set by dispatch when the binary is relaunched via `open` (launchd context).
+@property (nonatomic, assign) BOOL     appContext;
+/// Named pipe path the child reads audio from (stream-input mode).
+@property (nonatomic, copy, nullable) NSString *audioPipe;
+/// Named pipe path the child writes JSON result lines to.
+@property (nonatomic, copy, nullable) NSString *resultPipe;
 
 - (BOOL)runWithError:(NSError **)error;
 

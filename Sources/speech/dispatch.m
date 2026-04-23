@@ -49,6 +49,9 @@ BOOL MVDispatchSpeech(NSArray<NSString *> *args, NSError **error) {
     uint8_t  channels    = 1;
     uint8_t  bitDepth    = 16;
     BOOL offline = NO, debug = NO, noHeader = NO, noStream = NO;
+    BOOL appContext = NO;
+    NSString *audioPipe  = nil;
+    NSString *resultPipe = nil;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -62,10 +65,14 @@ BOOL MVDispatchSpeech(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--sample-rate"] && i+1 < (NSInteger)args.count)    { sampleRate = (uint32_t)[args[++i] integerValue]; }
         else if ([a isEqualToString:@"--channels"] && i+1 < (NSInteger)args.count)       { channels   = (uint8_t)[args[++i] integerValue]; }
         else if ([a isEqualToString:@"--bit-depth"] && i+1 < (NSInteger)args.count)      { bitDepth   = (uint8_t)[args[++i] integerValue]; }
-        else if ([a isEqualToString:@"--offline"])   { offline  = YES; }
-        else if ([a isEqualToString:@"--debug"])     { debug    = YES; }
-        else if ([a isEqualToString:@"--no-header"]) { noHeader = YES; }
-        else if ([a isEqualToString:@"--no-stream"]) { noStream = YES; }
+        else if ([a isEqualToString:@"--offline"])    { offline    = YES; }
+        else if ([a isEqualToString:@"--debug"])      { debug      = YES; }
+        else if ([a isEqualToString:@"--no-header"])  { noHeader   = YES; }
+        else if ([a isEqualToString:@"--no-stream"])  { noStream   = YES; }
+        // Internal args injected by the self-relaunch path — not shown in --help
+        else if ([a isEqualToString:@"--_app-context"])                                    { appContext  = YES; }
+        else if ([a isEqualToString:@"--_audio-pipe"]  && i+1 < (NSInteger)args.count)    { audioPipe  = args[++i]; }
+        else if ([a isEqualToString:@"--_result-pipe"] && i+1 < (NSInteger)args.count)    { resultPipe = args[++i]; }
         else {
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
@@ -97,5 +104,9 @@ BOOL MVDispatchSpeech(NSArray<NSString *> *args, NSError **error) {
     p.channels   = channels;
     p.bitDepth   = bitDepth;
     p.noHeader   = noHeader;
+    p.appContext  = appContext;
+    p.audioPipe  = audioPipe;
+    p.resultPipe = resultPipe;
+
     return [p runWithError:error];
 }

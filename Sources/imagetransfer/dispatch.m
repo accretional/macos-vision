@@ -38,6 +38,7 @@ static void printHelp(void) {
         "  --thumb-size <px>       Max thumbnail dimension in pixels\n"
         "  --dpi <n>               Scan resolution in DPI (default: scanner preferred)\n"
         "  --format <fmt>          Scanner output format: tiff (default), jpeg, png\n"
+        "  --catalog-timeout <s>   Seconds to wait for camera file catalog (default: 15)\n"
         "  --debug                 Emit processing_ms in output\n"
     );
 }
@@ -54,6 +55,7 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
     NSInteger thumbSize    = 0;
     NSInteger dpi          = 0;
     NSString *format       = nil;  // let ICCProcessor default to "tiff"
+    NSTimeInterval catalogTimeout = 15.0;
     BOOL debug             = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
@@ -67,6 +69,7 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--file-index"] && i+1 < (NSInteger)args.count)       { fileIndex   = [args[++i] integerValue]; }
         else if ([a isEqualToString:@"--thumb-size"] && i+1 < (NSInteger)args.count)       { thumbSize   = [args[++i] integerValue]; }
         else if ([a isEqualToString:@"--dpi"] && i+1 < (NSInteger)args.count)              { dpi         = [args[++i] integerValue]; }
+        else if ([a isEqualToString:@"--catalog-timeout"] && i+1 < (NSInteger)args.count) { catalogTimeout = [args[++i] doubleValue]; }
         else if ([a isEqualToString:@"--format"] && i+1 < (NSInteger)args.count)           { format      = args[++i]; }
         else if ([a isEqualToString:@"--all"])          { allFiles    = YES; }
         else if ([a isEqualToString:@"--delete-after"]) { deleteAfter = YES; }
@@ -109,6 +112,7 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
     p.downloadSidecars = sidecars;
     p.thumbSize        = thumbSize;
     p.scanDPI          = (NSUInteger)dpi;
+    p.catalogTimeout   = catalogTimeout;
     p.debug            = debug;
     p.streamOut        = streamOut;
     if (format.length)  p.outputFormat = format;

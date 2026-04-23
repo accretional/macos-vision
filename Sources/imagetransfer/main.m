@@ -227,8 +227,9 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
     if (self = [super init]) {
         _operation     = @"list-devices";
         _deviceIndex   = 0;
-        _browseTimeout = 2.0;
-        _outputFormat  = @"tiff";
+        _browseTimeout  = 2.0;
+        _catalogTimeout = 15.0;
+        _outputFormat   = @"tiff";
     }
     return self;
 }
@@ -371,7 +372,7 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
     }
 
     if (needCatalog) {
-        ICCSpinUntilCondition(^{ return session.catalogReady; }, 15.0);
+        ICCSpinUntilCondition(^{ return session.catalogReady; }, self.catalogTimeout);
     }
 
     if (cameraOut)  *cameraOut  = camera;

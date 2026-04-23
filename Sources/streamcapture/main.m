@@ -67,15 +67,23 @@ static void CPrintNDJSON(NSDictionary *obj) {
 @interface CaptureMovieDelegate : NSObject <AVCaptureFileOutputRecordingDelegate>
 @property (nonatomic) BOOL finished;
 @property (nonatomic, strong, nullable) NSError *recordingError;
+@property (nonatomic) dispatch_semaphore_t doneSem;
 @end
 
 @implementation CaptureMovieDelegate
+- (instancetype)init {
+    if (self = [super init]) {
+        _doneSem = dispatch_semaphore_create(0);
+    }
+    return self;
+}
 - (void)captureOutput:(AVCaptureFileOutput *)output
     didFinishRecordingToOutputFileAtURL:(NSURL *)url
                         fromConnections:(NSArray<AVCaptureConnection *> *)connections
                                   error:(NSError *)error {
     self.recordingError = error;
     self.finished = YES;
+    dispatch_semaphore_signal(self.doneSem);
 }
 @end
 
@@ -496,19 +504,11 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
             CPumpAppKit();
             [NSThread sleepForTimeInterval:0.02];
         }
-        fprintf(stderr, "Press ENTER to capture photo from '%s'...\n", device.localizedName.UTF8String);
-        __block volatile BOOL enterPressed = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin);
-            enterPressed = YES;
-        });
-        CSpinAppKitUntilFlag(&enterPressed);
     } else {
-        // Headless: block on sleep + fgets; run loop not needed
+        // Headless: wait for camera to stabilise
         [NSThread sleepForTimeInterval:1.5];
-        fprintf(stderr, "Press ENTER to capture photo from '%s'...\n", device.localizedName.UTF8String);
-        char lb[256]; fgets(lb, sizeof(lb), stdin);
     }
+    fprintf(stderr, "Capturing photo from '%s'...\n", device.localizedName.UTF8String);
 
     delegate.shouldCapture = YES;
     dispatch_semaphore_wait(capSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
@@ -558,47 +558,48 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
 
     NSString *autoName = [NSString stringWithFormat:@"audio_%ld.m4a", (long)[[NSDate date] timeIntervalSince1970]];
     NSURL *mediaURL = [self resolveMediaURLWithName:autoName];
+
+    // Validate the output extension — macOS has no mp3 encoder
+    NSString *ext = mediaURL.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"mp3"]) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:1
+            userInfo:@{NSLocalizedDescriptionKey:
+                @"mp3 encoding is not supported on macOS — use .m4a (AAC) or .wav instead"}];
+        return NO;
+    }
+
     [[NSFileManager defaultManager] createDirectoryAtURL:mediaURL.URLByDeletingLastPathComponent
                              withIntermediateDirectories:YES attributes:nil error:nil];
 
-    NSDictionary *settings = @{
-        AVFormatIDKey:         @(kAudioFormatMPEG4AAC),
-        AVSampleRateKey:       @44100.0,
-        AVNumberOfChannelsKey: @1,
-        AVEncoderBitRateKey:   @128000,
-    };
+    BOOL isWav = [ext isEqualToString:@"wav"] || [ext isEqualToString:@"aiff"] || [ext isEqualToString:@"aif"];
+    NSDictionary *settings = isWav
+        ? @{
+            AVFormatIDKey:         @(kAudioFormatLinearPCM),
+            AVSampleRateKey:       @44100.0,
+            AVNumberOfChannelsKey: @1,
+            AVLinearPCMBitDepthKey: @16,
+            AVLinearPCMIsFloatKey:  @NO,
+          }
+        : @{
+            AVFormatIDKey:         @(kAudioFormatMPEG4AAC),
+            AVSampleRateKey:       @44100.0,
+            AVNumberOfChannelsKey: @1,
+            AVEncoderBitRateKey:   @128000,
+          };
     AVAudioRecorder *recorder = [[AVAudioRecorder alloc] initWithURL:mediaURL settings:settings error:error];
     if (!recorder) return NO;
 
     gStopCapture = 0;
     signal(SIGINT, captureSignalHandler);
 
+    [recorder record];
     if (self.duration > 0) {
-        // Headless: start immediately, auto-stop after duration (ENTER or Ctrl+C stop early)
-        [recorder record];
-        fprintf(stderr, "Recording audio for %.0f seconds... (ENTER or Ctrl+C to stop early)\n", self.duration);
-        __block volatile BOOL enter = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin); enter = YES;
-        });
-        CSpinUntilFlagOrStop(&enter, self.duration);
+        fprintf(stderr, "Recording audio for %.0f seconds... (Ctrl+C to stop early)\n", self.duration);
+        volatile BOOL never = NO;
+        CSpinUntilFlagOrStop(&never, self.duration);
     } else {
-        // Interactive: ENTER to start, ENTER to stop
-        fprintf(stderr, "Press ENTER to start recording...\n");
-        __block volatile BOOL enter1 = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin); enter1 = YES;
-        });
-        CSpinUntilFlagOrStop(&enter1, 0);
-        if (!gStopCapture) {
-            [recorder record];
-            fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-            __block volatile BOOL enter2 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter2 = YES;
-            });
-            CSpinUntilFlagOrStop(&enter2, 0);
-        }
+        fprintf(stderr, "Recording audio... (Ctrl+C to stop)\n");
+        while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
     }
 
     NSTimeInterval recDuration = recorder.currentTime;
@@ -660,65 +661,38 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
         previewWindow = [self createPreviewWindowForSession:session
             title:[NSString stringWithFormat:@"Preview — %@", device.localizedName]];
         [session startRunning];
-
-        fprintf(stderr, "Press ENTER to start recording from '%s'...\n", device.localizedName.UTF8String);
-        __block volatile BOOL enter1 = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin);
-            enter1 = YES;
-        });
-        CSpinAppKitUntilFlag(&enter1);
-
-        if (!gStopCapture) {
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-            __block volatile BOOL enter2 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin);
-                enter2 = YES;
-            });
-            CSpinAppKitUntilFlagOrStop(&enter2, self.duration);
-            [movieOutput stopRecording];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
+        if (self.duration > 0) {
+            fprintf(stderr, "Recording video for %.0f seconds from '%s'... (Ctrl+C to stop early)\n",
+                    self.duration, device.localizedName.UTF8String);
+        } else {
+            fprintf(stderr, "Recording from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
         }
+        volatile BOOL never = NO;
+        CSpinAppKitUntilFlagOrStop(&never, self.duration);
+        [movieOutput stopRecording];
     } else {
         [session startRunning];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
         if (self.duration > 0) {
-            // Headless: start immediately, auto-stop after duration
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording video for %.0f seconds from '%s'... (ENTER or Ctrl+C to stop early)\n",
+            fprintf(stderr, "Recording video for %.0f seconds from '%s'... (Ctrl+C to stop early)\n",
                     self.duration, device.localizedName.UTF8String);
-            __block volatile BOOL enter = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter = YES;
-            });
-            CSpinUntilFlagOrStop(&enter, self.duration);
+            volatile BOOL never = NO;
+            CSpinUntilFlagOrStop(&never, self.duration);
         } else {
-            // Interactive: ENTER to start, ENTER to stop
-            fprintf(stderr, "Press ENTER to start recording from '%s'...\n", device.localizedName.UTF8String);
-            __block volatile BOOL enter1 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter1 = YES;
-            });
-            CSpinUntilFlagOrStop(&enter1, 0);
-            if (!gStopCapture) {
-                [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-                fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-                __block volatile BOOL enter2 = NO;
-                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                    char buf[256]; fgets(buf, sizeof(buf), stdin); enter2 = YES;
-                });
-                CSpinUntilFlagOrStop(&enter2, 0);
-            }
+            fprintf(stderr, "Recording from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
+            while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
         }
         [movieOutput stopRecording];
     }
+
+    // Wait for AVCaptureMovieFileOutput to finalize the file; keep SIGINT
+    // handling active so a second Ctrl+C is caught rather than killing the
+    // process while the file is being written.
+    dispatch_semaphore_wait(delegate.doneSem,
+        dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
     signal(SIGINT, SIG_DFL);
 
-    // Wait for file to be finalized
-    NSDate *finDeadline = [NSDate dateWithTimeIntervalSinceNow:10.0];
-    while (!delegate.finished && [[NSDate date] compare:finDeadline] == NSOrderedAscending) {
-        [NSThread sleepForTimeInterval:0.05];
-    }
     [session stopRunning];
     [previewWindow close];
 
@@ -793,63 +767,35 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
         previewWindow = [self createPreviewWindowForSession:session
             title:[NSString stringWithFormat:@"Preview — Display %ld", (long)self.displayIndex]];
         [session startRunning];
-
-        fprintf(stderr, "Press ENTER to start recording display %ld...\n", (long)self.displayIndex);
-        __block volatile BOOL enter1 = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin);
-            enter1 = YES;
-        });
-        CSpinAppKitUntilFlag(&enter1);
-
-        if (!gStopCapture) {
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-            __block volatile BOOL enter2 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin);
-                enter2 = YES;
-            });
-            CSpinAppKitUntilFlag(&enter2);
-            [movieOutput stopRecording];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
+        if (self.duration > 0) {
+            fprintf(stderr, "Recording display %ld for %.0f seconds... (Ctrl+C to stop early)\n",
+                    (long)self.displayIndex, self.duration);
+        } else {
+            fprintf(stderr, "Recording display %ld... (Ctrl+C to stop)\n", (long)self.displayIndex);
         }
+        volatile BOOL never = NO;
+        CSpinAppKitUntilFlagOrStop(&never, self.duration);
+        [movieOutput stopRecording];
     } else {
         [session startRunning];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
         if (self.duration > 0) {
-            // Headless: start immediately, auto-stop after duration
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording screen for %.0f seconds... (ENTER or Ctrl+C to stop early)\n", self.duration);
-            __block volatile BOOL enter = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter = YES;
-            });
-            CSpinUntilFlagOrStop(&enter, self.duration);
+            fprintf(stderr, "Recording display %ld for %.0f seconds... (Ctrl+C to stop early)\n",
+                    (long)self.displayIndex, self.duration);
+            volatile BOOL never = NO;
+            CSpinUntilFlagOrStop(&never, self.duration);
         } else {
-            // Interactive: ENTER to start, ENTER to stop
-            fprintf(stderr, "Press ENTER to start recording display %ld...\n", (long)self.displayIndex);
-            __block volatile BOOL enter1 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter1 = YES;
-            });
-            CSpinUntilFlagOrStop(&enter1, 0);
-            if (!gStopCapture) {
-                [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-                fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-                __block volatile BOOL enter2 = NO;
-                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                    char buf[256]; fgets(buf, sizeof(buf), stdin); enter2 = YES;
-                });
-                CSpinUntilFlagOrStop(&enter2, 0);
-            }
+            fprintf(stderr, "Recording display %ld... (Ctrl+C to stop)\n", (long)self.displayIndex);
+            while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
         }
         [movieOutput stopRecording];
     }
+
+    dispatch_semaphore_wait(delegate.doneSem,
+        dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
     signal(SIGINT, SIG_DFL);
 
-    NSDate *finDeadline = [NSDate dateWithTimeIntervalSinceNow:10.0];
-    while (!delegate.finished && [[NSDate date] compare:finDeadline] == NSOrderedAscending) {
-        [NSThread sleepForTimeInterval:0.05];
-    }
     [session stopRunning];
     [previewWindow close];
 
@@ -1329,13 +1275,15 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
 
     gStopCapture = 0;
     signal(SIGINT, captureSignalHandler);
-    fprintf(stderr, "Scanning for barcodes from '%s'... (press ENTER or Ctrl+C to stop)\n", device.localizedName.UTF8String);
-
-    __block volatile BOOL enterPressed = NO;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        char buf[256]; fgets(buf, sizeof(buf), stdin); enterPressed = YES;
-    });
-    CSpinUntilFlagOrStop(&enterPressed, self.duration);
+    if (self.duration > 0) {
+        fprintf(stderr, "Scanning for barcodes from '%s' for %.0f seconds... (Ctrl+C to stop early)\n",
+                device.localizedName.UTF8String, self.duration);
+        volatile BOOL never = NO;
+        CSpinUntilFlagOrStop(&never, self.duration);
+    } else {
+        fprintf(stderr, "Scanning for barcodes from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
+        while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
+    }
 
     [session stopRunning];
     signal(SIGINT, SIG_DFL);
