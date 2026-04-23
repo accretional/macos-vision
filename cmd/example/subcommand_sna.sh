@@ -7,16 +7,11 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"; export ROOT
 eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'export {k}=\"{root}/{v}\"') for k,v in json.load(open(f)).items()]" "$ROOT" "$SCRIPT_DIR/data_files.json")"
 
 OUTPUT="$ROOT/sample_data/output/sna"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-
 mkdir -p "$OUTPUT"
 
-# ── generate synthetic audio long enough for the ~3 s classifier window ───────
-SYNTH="$TMP/synth.aiff"
-if ! say -o "$SYNTH" \
-    "Testing sound analysis. The quick brown fox jumps over the lazy dog. This audio is used for sound classification." \
-    2>/dev/null || [ ! -f "$SYNTH" ]; then
-    echo "  SKIP  all (say could not create sample audio)"
+SYNTH="$SYNTH_INPUT"
+if [ ! -f "$SYNTH" ]; then
+    echo "  SKIP  all (synth.aiff not found in sample_data/input/audios/)"
     exit 0
 fi
 

@@ -40,25 +40,25 @@ AUD_BASE="$(filename_base "$AUD")"
 run_file "presets" "$VID" \
     "$BINARY" av --operation presets \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_presets.json"
+                 --json-output "$OUTPUT/${VID_BASE}_presets.json"
 
 # ── probe ─────────────────────────────────────────────────────────────────────
 run_file "probe" "$VID" \
     "$BINARY" av --operation probe \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_probe.json"
+                 --json-output "$OUTPUT/${VID_BASE}_probe.json"
 
 # ── tracks ────────────────────────────────────────────────────────────────────
 run_file "tracks" "$VID" \
     "$BINARY" av --operation tracks \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_tracks.json"
+                 --json-output "$OUTPUT/${VID_BASE}_tracks.json"
 
 # ── meta ──────────────────────────────────────────────────────────────────────
 run_file "meta" "$VID" \
     "$BINARY" av --operation meta \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_meta.json"
+                 --json-output "$OUTPUT/${VID_BASE}_meta.json"
 
 # ── frames (single) ───────────────────────────────────────────────────────────
 run_file "frames (single)" "$VID" \
@@ -114,19 +114,19 @@ run_file "split" "$VID" \
 run_file "waveform" "$VID" \
     "$BINARY" av --operation waveform \
                  --input "$VID" \
-                 --output "$OUTPUT/${VID_BASE}_waveform.json"
+                 --json-output "$OUTPUT/${VID_BASE}_waveform.json"
 
 # ── noise ─────────────────────────────────────────────────────────────────────
 run_file "noise" "$AUD" \
     "$BINARY" av --operation noise \
                  --input "$AUD" \
-                 --output "$OUTPUT/${AUD_BASE}_noise.json"
+                 --json-output "$OUTPUT/${AUD_BASE}_noise.json"
 
 # ── pitch ─────────────────────────────────────────────────────────────────────
 run_file "pitch" "$AUD" \
     "$BINARY" av --operation pitch \
                  --input "$AUD" \
-                 --output "$OUTPUT/${AUD_BASE}_pitch.json"
+                 --json-output "$OUTPUT/${AUD_BASE}_pitch.json"
 
 # ── stems (voice isolation) ───────────────────────────────────────────────────
 run_file "stems" "$AUD" \

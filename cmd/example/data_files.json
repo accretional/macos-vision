@@ -55,8 +55,10 @@
   "SHAZAM_MATCH_INPUT": "sample_data/input/audios/badly_sung_sorry.mp3",
 
   "SNA_CLASSIFY_SPEECH_INPUT":   "sample_data/input/audios/kazoo_kid_who_are_you.wav",
-  "SNA_CLASSIFY_SOUNDS_INPUT":   "sample_data/input/audios/sounds.wav",
+  "SNA_CLASSIFY_SOUNDS_INPUT":   "sample_data/input/audios/badly_sung_sorry.mp3",
   "SNA_CLASSIFY_WINDOWED_INPUT": "sample_data/input/audios/kazoo_kid_who_are_you.wav",
+
+  "SYNTH_INPUT":                   "sample_data/input/audios/synth.aiff",
 
   "SPEECH_TRANSCRIBE_INPUT":       "sample_data/input/audios/kazoo_kid_who_are_you.wav",
   "SPEECH_VOICE_ANALYTICS_INPUT":  "sample_data/input/audios/kazoo_kid_who_are_you.wav",
