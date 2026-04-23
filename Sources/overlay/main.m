@@ -854,15 +854,12 @@ static NSData *OVAnnotateJPEG(NSData *jpeg, NSArray<SVGShape *> *shapes, BOOL sh
     CGColorSpaceRelease(cs);
     if (!ctx) { CGImageRelease(srcImg); return nil; }
 
-    // Draw source image (CG origin is bottom-left; flip so (0,0) = top-left for shape drawing)
+    // Flip CG's bottom-left origin to top-left so (0,0) = top-left for both image and shape drawing.
+    // OVDrawShapesOnContext expects this flip to be active (normalized coords: (0,0) = top-left).
     CGContextTranslateCTM(ctx, 0, (CGFloat)h);
     CGContextScaleCTM(ctx, 1.0, -1.0);
     CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), srcImg);
     CGImageRelease(srcImg);
-
-    // Undo flip so shapes draw in top-left space
-    CGContextScaleCTM(ctx, 1.0, -1.0);
-    CGContextTranslateCTM(ctx, 0, -(CGFloat)h);
 
     OVDrawShapesOnContext(ctx, shapes, (CGFloat)w, (CGFloat)h, showLabels);
 
@@ -889,11 +886,19 @@ static NSData *OVAnnotateJPEG(NSData *jpeg, NSArray<SVGShape *> *shapes, BOOL sh
 @implementation OverlayProcessor
 
 - (BOOL)runStreamWithError:(NSError **)error {
+    // S→F: if --output has an image extension, write the last annotated frame to file
+    static NSSet *imgExts = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ imgExts = [NSSet setWithArray:@[@"jpg", @"jpeg", @"png", @"tiff", @"tif", @"bmp"]]; });
+    BOOL writeImageFile = self.svgOutput.length &&
+                          [imgExts containsObject:self.svgOutput.pathExtension.lowercaseString];
+
     MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
-    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    MVMjpegWriter *writer = writeImageFile ? nil : [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+
+    __block NSData *lastAnnotated = nil;
 
     [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *headers) {
-        // Collect shapes from every X-MV-* header
         NSMutableArray<SVGShape *> *shapes = [NSMutableArray array];
         for (NSString *key in headers) {
             if (![key hasPrefix:@"X-MV-"]) continue;
@@ -905,9 +910,27 @@ static NSData *OVAnnotateJPEG(NSData *jpeg, NSArray<SVGShape *> *shapes, BOOL sh
                 [shapes addObjectsFromArray:OVShapesFromJSON(dict)];
         }
 
-        NSData *out = shapes.count ? OVAnnotateJPEG(jpeg, shapes, self.showLabels) : nil;
-        [writer writeFrame:(out ?: jpeg) extraHeaders:nil];
+        NSData *annotated = shapes.count ? OVAnnotateJPEG(jpeg, shapes, self.showLabels) : nil;
+
+        if (writeImageFile) {
+            lastAnnotated = annotated ?: jpeg;
+        } else {
+            [writer writeFrame:(annotated ?: jpeg) extraHeaders:nil];
+        }
     }];
+
+    if (writeImageFile) {
+        if (!lastAnnotated) {
+            if (error) *error = [NSError errorWithDomain:SVGErrorDomain code:SVGErrorMissingInput
+                                userInfo:@{NSLocalizedDescriptionKey: @"No frames received from stdin stream"}];
+            return NO;
+        }
+        NSString *dir = self.svgOutput.stringByDeletingLastPathComponent;
+        if (dir.length)
+            [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                      withIntermediateDirectories:YES attributes:nil error:nil];
+        return [lastAnnotated writeToFile:self.svgOutput options:NSDataWritingAtomic error:error];
+    }
 
     return YES;
 }
@@ -917,12 +940,23 @@ static NSData *OVAnnotateJPEG(NSData *jpeg, NSArray<SVGShape *> *shapes, BOOL sh
     if (!self.jsonPath.length) {
         if (error) *error = [NSError errorWithDomain:SVGErrorDomain code:SVGErrorMissingInput
                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                @"--json <path> is required"}];
+                                                @"Provide --json <path> or pipe JSON to stdin with --json -"}];
         return NO;
     }
 
-    NSData *data = [NSData dataWithContentsOfFile:self.jsonPath options:0 error:error];
-    if (!data) return NO;
+    // Load JSON — from stdin if --json - was specified, otherwise from file
+    NSData *data;
+    if ([self.jsonPath isEqualToString:@"-"]) {
+        data = [[NSFileHandle fileHandleWithStandardInput] readDataToEndOfFile];
+        if (!data.length) {
+            if (error) *error = [NSError errorWithDomain:SVGErrorDomain code:SVGErrorMissingInput
+                                userInfo:@{NSLocalizedDescriptionKey: @"No JSON data received on stdin"}];
+            return NO;
+        }
+    } else {
+        data = [NSData dataWithContentsOfFile:self.jsonPath options:0 error:error];
+        if (!data) return NO;
+    }
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
     if (!json) return NO;
 

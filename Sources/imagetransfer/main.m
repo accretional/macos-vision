@@ -1,5 +1,6 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <ImageCaptureCore/ImageCaptureCore.h>
 #import <ImageIO/ImageIO.h>
 
@@ -578,6 +579,13 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
         return NO;
     }
 
+    // Stream mode: write thumbnail as single MJPEG frame to stdout
+    if (self.streamOut) {
+        MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+        [writer writeFrame:thumbData extraHeaders:nil];
+        return YES;
+    }
+
     // Write JPEG to outputPath when provided
     NSString *writtenPath = nil;
     if (self.outputPath.length) {
@@ -995,9 +1003,30 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
         return NO;
     }
 
+    CGImageRef overviewImage = fu.overviewImage;
+
+    // Stream mode: encode overview as JPEG and write as single MJPEG frame
+    if (self.streamOut) {
+        [scanner requestCloseSession];
+        if (overviewImage) {
+            NSMutableData *jpegData = [NSMutableData data];
+            CGImageDestinationRef dest = CGImageDestinationCreateWithData(
+                (__bridge CFMutableDataRef)jpegData, kUTTypeJPEG, 1, NULL);
+            if (dest) {
+                NSDictionary *props = @{(id)kCGImageDestinationLossyCompressionQuality: @0.85};
+                CGImageDestinationAddImage(dest, overviewImage, (__bridge CFDictionaryRef)props);
+                if (CGImageDestinationFinalize(dest)) {
+                    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+                    [writer writeFrame:jpegData extraHeaders:nil];
+                }
+                CFRelease(dest);
+            }
+        }
+        return YES;
+    }
+
     // Save overviewImage (CGImageRef) as PNG using ImageIO
     NSString *writtenPath = nil;
-    CGImageRef overviewImage = fu.overviewImage;
     if (overviewImage && self.outputPath.length) {
         writtenPath = self.outputPath;
         BOOL isDir = NO;
@@ -1114,6 +1143,40 @@ static BOOL ICCSpinUntilCondition(BOOL (^condition)(void), NSTimeInterval timeou
     NSMutableArray<NSString *> *pages = [NSMutableArray array];
     for (NSURL *url in helper.scannedURLs) {
         [pages addObject:url.path];
+    }
+
+    // Stream mode: emit each scanned page as an MJPEG frame
+    if (self.streamOut) {
+        MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+        for (NSString *pagePath in pages) {
+            NSData *pageData = nil;
+            NSString *ext = pagePath.pathExtension.lowercaseString;
+            if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"]) {
+                pageData = [NSData dataWithContentsOfFile:pagePath];
+            } else {
+                // Re-encode as JPEG via CGImage
+                CGImageSourceRef src = CGImageSourceCreateWithURL(
+                    (__bridge CFURLRef)[NSURL fileURLWithPath:pagePath], nil);
+                if (src) {
+                    CGImageRef cg = CGImageSourceCreateImageAtIndex(src, 0, nil);
+                    CFRelease(src);
+                    if (cg) {
+                        NSMutableData *jpegData = [NSMutableData data];
+                        CGImageDestinationRef dest = CGImageDestinationCreateWithData(
+                            (__bridge CFMutableDataRef)jpegData, kUTTypeJPEG, 1, NULL);
+                        if (dest) {
+                            NSDictionary *props = @{(id)kCGImageDestinationLossyCompressionQuality: @0.85};
+                            CGImageDestinationAddImage(dest, cg, (__bridge CFDictionaryRef)props);
+                            if (CGImageDestinationFinalize(dest)) pageData = jpegData;
+                            CFRelease(dest);
+                        }
+                        CGImageRelease(cg);
+                    }
+                }
+            }
+            if (pageData) [writer writeFrame:pageData extraHeaders:nil];
+        }
+        return YES;
     }
 
     NSMutableDictionary *result = [NSMutableDictionary dictionary];

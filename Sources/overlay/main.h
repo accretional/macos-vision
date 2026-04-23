@@ -73,7 +73,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *jsonPath;
 /// Override image path. If nil, falls back to info.filepath inside the JSON.
 @property (nonatomic, copy, nullable) NSString *inputPath;
-/// Path to the .svg file to write. If nil, writes <jsonBasename>.svg next to the JSON.
+/// Path to the output file. For SVG mode: .svg file (default: <jsonBasename>.svg beside the JSON).
+/// For MJPEG→file mode: image file path (.jpg/.png/etc.) — writes the last annotated frame.
 @property (nonatomic, copy, nullable) NSString *svgOutput;
 /// JSON envelope written to this file, or stdout if nil.
 @property (nonatomic, copy, nullable) NSString *jsonOutput;

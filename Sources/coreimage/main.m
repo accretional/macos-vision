@@ -30,7 +30,8 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    if (self.streamOut && !self.stream) return [self runFileToStreamWithError:error]; // F→S
+    if (self.stream)    return [self runStreamWithError:error];      // S→S or S→F
+    if (self.streamOut) return [self runFileToStreamWithError:error]; // F→S
     NSArray *validOps = @[@"apply-filter", @"suggest-filters", @"list-filters", @"auto-adjust"];
     if (![validOps containsObject:self.operation]) {
         if (error) {
@@ -95,6 +96,100 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
     if (!result) return NO;
     NSDictionary *envelope = MVMakeEnvelope(@"coreimage", self.operation, self.inputPath, result);
     return MVEmitEnvelope(envelope, self.jsonOutput, error);
+}
+
+// ── S→S / S→F stream mode ─────────────────────────────────────────────────────
+
+- (BOOL)runStreamWithError:(NSError **)error {
+    NSString *op = self.operation.length ? self.operation : @"apply-filter";
+
+    // list-filters / suggest-filters have no pixel transform; not useful in S→S
+    if ([op isEqualToString:@"list-filters"] || [op isEqualToString:@"suggest-filters"]) {
+        if (error) *error = [NSError errorWithDomain:CIProcessorErrorDomain
+                                               code:CIProcessorErrorUnknownOperation
+                             userInfo:@{NSLocalizedDescriptionKey:
+                                 [NSString stringWithFormat:@"coreimage '%@' has no stream mode; omit --no-stream or use a different operation", op]}];
+        return NO;
+    }
+
+    if ([op isEqualToString:@"apply-filter"] && !self.filterName.length) {
+        if (error) *error = [NSError errorWithDomain:CIProcessorErrorDomain
+                                               code:CIProcessorErrorMissingFilter
+                             userInfo:@{NSLocalizedDescriptionKey:
+                                 @"Provide --filter-name <CIFilterName>"}];
+        return NO;
+    }
+
+    // Create filter once; update kCIInputImageKey per frame (apply-filter only)
+    CIFilter *filter = nil;
+    BOOL filterNeedsImage = NO;
+    if ([op isEqualToString:@"apply-filter"]) {
+        filter = [CIFilter filterWithName:self.filterName];
+        if (!filter) {
+            if (error) *error = [NSError errorWithDomain:CIProcessorErrorDomain
+                                                   code:CIProcessorErrorUnknownFilter
+                                 userInfo:@{NSLocalizedDescriptionKey:
+                                     [NSString stringWithFormat:@"Unknown filter '%@'", self.filterName]}];
+            return NO;
+        }
+        [filter setDefaults];
+        // Apply scalar params once
+        if (self.filterParamsJSON.length) {
+            NSData *d = [self.filterParamsJSON dataUsingEncoding:NSUTF8StringEncoding];
+            NSDictionary *params = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+            if ([params isKindOfClass:[NSDictionary class]]) {
+                [params enumerateKeysAndObjectsUsingBlock:^(NSString *key, id val, BOOL *stop) {
+                    if ([val isKindOfClass:[NSNumber class]]) [filter setValue:val forKey:key];
+                }];
+            }
+        }
+        filterNeedsImage = [filter.inputKeys containsObject:kCIInputImageKey];
+    }
+
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+
+    CIContext *ctx = [CIContext contextWithOptions:nil];
+    CGColorSpaceRef sRGB = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
+        NSMutableDictionary *outHeaders = [NSMutableDictionary dictionaryWithDictionary:inHeaders];
+        [outHeaders removeObjectForKey:@"Content-Type"];
+        [outHeaders removeObjectForKey:@"Content-Length"];
+
+        // Decode JPEG → CIImage
+        CIImage *frameCI = [CIImage imageWithData:jpeg];
+        if (!frameCI) { [writer writeFrame:jpeg extraHeaders:outHeaders]; return; }
+
+        CIImage *outputCI = nil;
+
+        if ([op isEqualToString:@"apply-filter"]) {
+            if (filterNeedsImage) [filter setValue:frameCI forKey:kCIInputImageKey];
+            outputCI = filter.outputImage;
+            // Clamp infinite extent (generators)
+            if (outputCI && (isinf(outputCI.extent.size.width) || isinf(outputCI.extent.size.height))) {
+                outputCI = [outputCI imageByCroppingToRect:frameCI.extent];
+            }
+        } else if ([op isEqualToString:@"auto-adjust"]) {
+            NSArray<CIFilter *> *adjustFilters = [frameCI autoAdjustmentFiltersWithOptions:nil];
+            CIImage *current = frameCI;
+            for (CIFilter *f in adjustFilters) {
+                [f setValue:current forKey:kCIInputImageKey];
+                CIImage *out = f.outputImage;
+                if (out) current = out;
+            }
+            outputCI = current;
+        }
+
+        if (!outputCI) { [writer writeFrame:jpeg extraHeaders:outHeaders]; return; }
+
+        NSData *outJpeg = [ctx JPEGRepresentationOfImage:outputCI colorSpace:sRGB options:@{}];
+        [writer writeFrame:(outJpeg ?: jpeg) extraHeaders:outHeaders];
+    }];
+
+    CGColorSpaceRelease(sRGB);
+    return YES;
 }
 
 // ── F→S mode: file input → single MJPEG frame out ────────────────────────────

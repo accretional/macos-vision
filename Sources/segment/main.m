@@ -21,14 +21,8 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
 // ── public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    if (self.streamOut && !self.stream) return [self runFileToStreamWithError:error]; // F→S
-    if (self.stream) {
-        // S→S / S→F not yet implemented for segment
-        if (error) *error = [NSError errorWithDomain:SegmentErrorDomain code:SegmentErrorMissingInput
-                            userInfo:@{NSLocalizedDescriptionKey:
-                                @"segment does not support MJPEG stream input; use --input <image> or --no-stream"}];
-        return NO;
-    }
+    if (self.stream)    return [self runStreamWithError:error];      // S→S or S→F
+    if (self.streamOut) return [self runFileToStreamWithError:error]; // F→S
     NSString *op = self.operation.length ? self.operation : @"foreground-mask";
     if (!self.inputPath.length) {
         if (error) {
@@ -39,6 +33,141 @@ typedef NS_ENUM(NSInteger, SegmentErrorCode) {
         return NO;
     }
     return [self processImage:self.inputPath operation:op error:error];
+}
+
+// ── stream helpers ────────────────────────────────────────────────────────────
+
+static CIImage *SGScaleToExtent(CIImage *img, CGRect extent) {
+    if (CGSizeEqualToSize(img.extent.size, extent.size)) return img;
+    CGFloat sx = extent.size.width  / img.extent.size.width;
+    CGFloat sy = extent.size.height / img.extent.size.height;
+    return [img imageByApplyingTransform:CGAffineTransformMakeScale(sx, sy)];
+}
+
+static CIImage *SGComposeOverBlack(CIImage *image, CGRect extent) {
+    CIImage *black = [[CIImage imageWithColor:[CIColor blackColor]] imageByCroppingToRect:extent];
+    CIFilter *f = [CIFilter filterWithName:@"CISourceOverCompositing"];
+    [f setValue:image forKey:kCIInputImageKey];
+    [f setValue:black forKey:kCIInputBackgroundImageKey];
+    return f.outputImage;
+}
+
+// Returns array of output CIImages for a single input frame.
+// Empty array = drop frame (e.g. person-mask with no detections).
+- (NSArray<CIImage *> *)streamProcessCGImage:(CGImageRef)cg operation:(NSString *)op {
+    CIImage *original = [CIImage imageWithCGImage:cg];
+    CGRect extent = original.extent;
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+
+    if ([op isEqualToString:@"foreground-mask"]) {
+        if (@available(macOS 14.0, *)) {
+            VNGenerateForegroundInstanceMaskRequest *req = [[VNGenerateForegroundInstanceMaskRequest alloc] init];
+            if (![handler performRequests:@[req] error:nil] || !req.results.firstObject) return @[];
+            VNInstanceMaskObservation *obs = req.results.firstObject;
+            CVPixelBufferRef pb = [obs generateMaskedImageOfInstances:obs.allInstances
+                                                    fromRequestHandler:handler
+                                               croppedToInstancesExtent:NO error:nil];
+            if (!pb) return @[];
+            CIImage *masked = SGScaleToExtent([CIImage imageWithCVPixelBuffer:pb], extent);
+            CVPixelBufferRelease(pb);
+            return @[SGComposeOverBlack(masked, extent)];
+        }
+        return @[];
+    }
+
+    if ([op isEqualToString:@"person-segment"]) {
+        if (@available(macOS 12.0, *)) {
+            VNGeneratePersonSegmentationRequest *req = [[VNGeneratePersonSegmentationRequest alloc] init];
+            req.qualityLevel = VNGeneratePersonSegmentationRequestQualityLevelAccurate;
+            if (![handler performRequests:@[req] error:nil] || !req.results.firstObject) return @[];
+            VNPixelBufferObservation *obs = req.results.firstObject;
+            CIImage *mask = SGScaleToExtent([CIImage imageWithCVPixelBuffer:obs.pixelBuffer], extent);
+            CIImage *black = [[CIImage imageWithColor:[CIColor blackColor]] imageByCroppingToRect:extent];
+            CIFilter *blend = [CIFilter filterWithName:@"CIBlendWithMask"];
+            [blend setValue:original forKey:kCIInputImageKey];
+            [blend setValue:black    forKey:kCIInputBackgroundImageKey];
+            [blend setValue:mask     forKey:kCIInputMaskImageKey];
+            return @[blend.outputImage];
+        }
+        return @[];
+    }
+
+    if ([op isEqualToString:@"person-mask"]) {
+        if (@available(macOS 14.0, *)) {
+            VNGeneratePersonInstanceMaskRequest *req = [[VNGeneratePersonInstanceMaskRequest alloc] init];
+            if (![handler performRequests:@[req] error:nil] || !req.results.firstObject) return @[];
+            VNInstanceMaskObservation *obs = req.results.firstObject;
+            NSMutableArray<CIImage *> *frames = [NSMutableArray array];
+            [obs.allInstances enumerateIndexesUsingBlock:^(NSUInteger instance, BOOL *stop) {
+                NSIndexSet *single = [NSIndexSet indexSetWithIndex:instance];
+                CVPixelBufferRef pb = [obs generateMaskedImageOfInstances:single
+                                                        fromRequestHandler:handler
+                                                   croppedToInstancesExtent:NO error:nil];
+                if (!pb) return;
+                CIImage *masked = SGScaleToExtent([CIImage imageWithCVPixelBuffer:pb], extent);
+                CVPixelBufferRelease(pb);
+                CIImage *out = SGComposeOverBlack(masked, extent);
+                if (out) [frames addObject:out];
+            }];
+            return frames;
+        }
+        return @[];
+    }
+
+    if ([op isEqualToString:@"attention-saliency"] || [op isEqualToString:@"objectness-saliency"]) {
+        VNRequest *req = [op isEqualToString:@"attention-saliency"]
+            ? [[VNGenerateAttentionBasedSaliencyImageRequest alloc] init]
+            : [[VNGenerateObjectnessBasedSaliencyImageRequest alloc] init];
+        if (![handler performRequests:@[req] error:nil] || !req.results.firstObject) return @[original];
+        VNSaliencyImageObservation *obs = (VNSaliencyImageObservation *)req.results.firstObject;
+        CIImage *heatmap = SGScaleToExtent([CIImage imageWithCVPixelBuffer:obs.pixelBuffer], extent);
+        // Composite red tint over original using heatmap as mask
+        CIImage *red = [[CIImage imageWithColor:[CIColor colorWithRed:1 green:0.2 blue:0 alpha:1]]
+                        imageByCroppingToRect:extent];
+        CIFilter *blend = [CIFilter filterWithName:@"CIBlendWithMask"];
+        [blend setValue:red      forKey:kCIInputImageKey];
+        [blend setValue:original forKey:kCIInputBackgroundImageKey];
+        [blend setValue:heatmap  forKey:kCIInputMaskImageKey];
+        return @[blend.outputImage];
+    }
+
+    return @[original]; // unknown op: pass through
+}
+
+// ── S→S / S→F stream mode ─────────────────────────────────────────────────────
+
+- (BOOL)runStreamWithError:(NSError **)error {
+    NSString *op = self.operation.length ? self.operation : @"foreground-mask";
+
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+
+    CIContext *ctx = [CIContext contextWithOptions:nil];
+    CGColorSpaceRef sRGB = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
+        CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
+        CGImageRef cg = src ? CGImageSourceCreateImageAtIndex(src, 0, nil) : NULL;
+        if (src) CFRelease(src);
+        if (!cg) { [writer writeFrame:jpeg extraHeaders:nil]; return; }
+
+        NSMutableDictionary *outHeaders = [NSMutableDictionary dictionaryWithDictionary:inHeaders];
+        [outHeaders removeObjectForKey:@"Content-Type"];
+        [outHeaders removeObjectForKey:@"Content-Length"];
+
+        NSArray<CIImage *> *outputs = [self streamProcessCGImage:cg operation:op];
+        CGImageRelease(cg);
+
+        for (CIImage *outCI in outputs) {
+            NSData *outJpeg = [ctx JPEGRepresentationOfImage:outCI colorSpace:sRGB options:@{}];
+            if (outJpeg) [writer writeFrame:outJpeg extraHeaders:outHeaders];
+        }
+        // If outputs is empty (e.g. person-mask with no detections), frame is dropped — intentional.
+    }];
+
+    CGColorSpaceRelease(sRGB);
+    return YES;
 }
 
 // ── F→S mode: file input → single MJPEG frame out ────────────────────────────

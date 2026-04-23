@@ -1,4 +1,5 @@
 #import "imagetransfer/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -71,6 +72,7 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--delete-after"]) { deleteAfter = YES; }
         else if ([a isEqualToString:@"--sidecars"])     { sidecars    = YES; }
         else if ([a isEqualToString:@"--debug"])        { debug       = YES; }
+        else if ([a isEqualToString:@"--no-stream"])    { /* explicit file mode; stream is auto-detected */ }
         else {
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
@@ -88,6 +90,15 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
     else if (jsonOutput.length && isDir(jsonOutput))    resolvedJSON = [jsonOutput stringByAppendingPathComponent:jsonName];
     else if ([output.pathExtension.lowercaseString isEqualToString:@"json"]) resolvedJSON = output;
 
+    // Stream-out: auto-detect when stdout is piped for device→stream operations
+    static NSSet *streamableOps = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        streamableOps = [NSSet setWithArray:@[@"camera/thumbnail", @"scanner/preview", @"scanner/scan"]];
+    });
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    BOOL streamOut   = stdoutPiped && [streamableOps containsObject:operation];
+
     ICCProcessor *p = [[ICCProcessor alloc] init];
     p.operation        = operation;
     p.jsonOutput       = resolvedJSON;
@@ -99,6 +110,7 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
     p.thumbSize        = thumbSize;
     p.scanDPI          = (NSUInteger)dpi;
     p.debug            = debug;
+    p.streamOut        = streamOut;
     if (format.length)  p.outputFormat = format;
     if (output.length)  p.outputPath   = output;
     return [p runWithError:error];

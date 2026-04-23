@@ -25,6 +25,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) BOOL audioOnly;                 // --audio-only for encode
 @property (nonatomic, assign) double factor;                  // --factor for retime
 @property (nonatomic, assign) BOOL debug;
+/// When YES, write frames as MJPEG stream to stdout (frames F→S).
+@property (nonatomic, assign) BOOL streamOut;
+/// When YES, read MJPEG stream from stdin and encode to output file (encode S→F).
+@property (nonatomic, assign) BOOL stream;
+/// FPS for encode S→F (default 30).
+@property (nonatomic, assign) NSInteger fps;
 
 - (BOOL)runWithError:(NSError **)error;
 

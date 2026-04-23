@@ -1,7 +1,10 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <AVFoundation/AVFoundation.h>
 #import <AppKit/AppKit.h>
+#import <CoreImage/CoreImage.h>
+#import <CoreVideo/CoreVideo.h>
 
 static NSString * const MediaErrorDomain = @"AVProcessorError";
 
@@ -29,6 +32,9 @@ typedef NS_ENUM(NSInteger, AVProcessorErrorCode) {
     AVProcessorErrorFetchFailed     = 21,
     AVProcessorErrorRetimeFactor    = 22,
     AVProcessorErrorSplitNoPoints   = 23,
+    AVProcessorErrorStreamOutput    = 24,
+    AVProcessorErrorStreamEncode    = 25,
+    AVProcessorErrorOutputRequired  = 26,
 };
 
 static NSArray<NSDictionary *> *MAVCollectArtifacts(NSDictionary *obj) {
@@ -229,6 +235,7 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
 - (instancetype)init {
     if (self = [super init]) {
         _operation = @"probe";
+        _fps = 30;
     }
     return self;
 }
@@ -243,6 +250,10 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
                                             [NSString stringWithFormat:@"Unknown operation '%@'", self.operation]}];
         return NO;
     }
+
+    // encode S→F: MJPEG from stdin → video file
+    if ([self.operation isEqualToString:@"encode"] && self.stream)
+        return [self runEncodeStreamWithError:error];
 
     // Operations that don't need a single media-file input
     if ([self.operation isEqualToString:@"presets"]) return [self runPresets:error];
@@ -266,6 +277,9 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
 
     if ([self.operation isEqualToString:@"frames"] && isImage) {
         return [self runFramesFromImage:mediaURL error:error];
+    }
+    if ([self.operation isEqualToString:@"frames"] && self.streamOut) {
+        return [self runFramesToStreamWithAsset:[AVURLAsset URLAssetWithURL:mediaURL options:@{AVURLAssetPreferPreciseDurationAndTimingKey: @YES}] error:error];
     }
 
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:mediaURL
@@ -423,6 +437,205 @@ static BOOL MRunExportSession(AVAssetExportSession *session, NSError **error) {
         @"chapters": chapters,
     } mutableCopy];
     if (t0) out[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:t0] * 1000.0));
+    return [self emit:out error:error];
+}
+
+// ── frames F→S: video file → MJPEG stream ────────────────────────────────────
+
+- (BOOL)runFramesToStreamWithAsset:(AVURLAsset *)asset error:(NSError **)error {
+    MWaitAssetKeys(asset, @[@"tracks"]);
+    AVAssetTrack *videoTrack = [[asset tracksWithMediaType:AVMediaTypeVideo] firstObject];
+    if (!videoTrack) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorNoVideoTrack
+                             userInfo:@{NSLocalizedDescriptionKey: @"No video track found"}];
+        return NO;
+    }
+
+    NSDictionary *outputSettings = @{
+        (NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+    };
+    AVAssetReaderTrackOutput *trackOutput =
+        [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:videoTrack outputSettings:outputSettings];
+
+    NSError *readerErr = nil;
+    AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:&readerErr];
+    if (!reader) {
+        if (error) *error = readerErr;
+        return NO;
+    }
+    [reader addOutput:trackOutput];
+    if (![reader startReading]) {
+        if (error) *error = reader.error;
+        return NO;
+    }
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    CIContext *ciCtx = [CIContext context];
+    CGColorSpaceRef sRGB = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+
+    while (reader.status == AVAssetReaderStatusReading) {
+        CMSampleBufferRef sample = [trackOutput copyNextSampleBuffer];
+        if (!sample) break;
+
+        CVPixelBufferRef pxbuf = CMSampleBufferGetImageBuffer(sample);
+        if (pxbuf) {
+            CIImage *ci = [CIImage imageWithCVPixelBuffer:pxbuf];
+            NSData *jpeg = [ciCtx JPEGRepresentationOfImage:ci colorSpace:sRGB options:@{}];
+            if (jpeg) [writer writeFrame:jpeg extraHeaders:nil];
+        }
+        CFRelease(sample);
+    }
+    CGColorSpaceRelease(sRGB);
+
+    if (reader.status == AVAssetReaderStatusFailed) {
+        if (error) *error = reader.error;
+        return NO;
+    }
+    return YES;
+}
+
+// ── encode S→F: MJPEG stream → video file ────────────────────────────────────
+
+- (BOOL)runEncodeStreamWithError:(NSError **)error {
+    if (!self.mediaOutput.length) {
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorOutputRequired
+                             userInfo:@{NSLocalizedDescriptionKey: @"encode --output <file> is required for stream input"}];
+        return NO;
+    }
+
+    NSURL *outputURL = [NSURL fileURLWithPath:self.mediaOutput];
+    [[NSFileManager defaultManager] removeItemAtURL:outputURL error:nil];
+    [[NSFileManager defaultManager] createDirectoryAtURL:outputURL.URLByDeletingLastPathComponent
+                             withIntermediateDirectories:YES attributes:nil error:nil];
+
+    NSInteger fps = self.fps > 0 ? self.fps : 30;
+    CMTime frameDuration = CMTimeMake(1, (int32_t)fps);
+
+    __block AVAssetWriter *writer = nil;
+    __block AVAssetWriterInput *writerInput = nil;
+    __block AVAssetWriterInputPixelBufferAdaptor *adaptor = nil;
+    __block CMTime pts = kCMTimeZero;
+    __block BOOL setupOK = YES;
+    __block NSError *setupErr = nil;
+    __block NSError *writeErr = nil;
+
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *headers) {
+        if (!setupOK) return;
+
+        // Decode JPEG
+        CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
+        CGImageRef cg = src ? CGImageSourceCreateImageAtIndex(src, 0, nil) : NULL;
+        if (src) CFRelease(src);
+        if (!cg) return;
+
+        size_t w = CGImageGetWidth(cg);
+        size_t h = CGImageGetHeight(cg);
+
+        // One-time writer setup from first frame dimensions
+        if (!writer) {
+            NSError *err = nil;
+            writer = [AVAssetWriter assetWriterWithURL:outputURL fileType:AVFileTypeMPEG4 error:&err];
+            if (!writer) {
+                setupOK = NO; setupErr = err;
+                CGImageRelease(cg); return;
+            }
+
+            NSDictionary *videoSettings = @{
+                AVVideoCodecKey: AVVideoCodecTypeH264,
+                AVVideoWidthKey: @(w),
+                AVVideoHeightKey: @(h),
+                AVVideoCompressionPropertiesKey: @{
+                    AVVideoAverageBitRateKey: @(w * h * 2),
+                    AVVideoMaxKeyFrameIntervalKey: @(fps),
+                },
+            };
+            writerInput = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:videoSettings];
+            writerInput.expectsMediaDataInRealTime = NO;
+
+            NSDictionary *pbAttrs = @{
+                (NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+                (NSString *)kCVPixelBufferWidthKey:            @(w),
+                (NSString *)kCVPixelBufferHeightKey:           @(h),
+            };
+            adaptor = [AVAssetWriterInputPixelBufferAdaptor
+                       assetWriterInputPixelBufferAdaptorWithAssetWriterInput:writerInput
+                       sourcePixelBufferAttributes:pbAttrs];
+
+            [writer addInput:writerInput];
+            [writer startWriting];
+            [writer startSessionAtSourceTime:kCMTimeZero];
+        }
+
+        // CGImage → CVPixelBuffer
+        CVPixelBufferRef pxbuf = NULL;
+        NSDictionary *pbOpts = @{
+            (NSString *)kCVPixelBufferCGImageCompatibilityKey:         @YES,
+            (NSString *)kCVPixelBufferCGBitmapContextCompatibilityKey: @YES,
+        };
+        CVReturn cvr = CVPixelBufferCreate(kCFAllocatorDefault, w, h,
+                                          kCVPixelFormatType_32BGRA,
+                                          (__bridge CFDictionaryRef)pbOpts, &pxbuf);
+        if (cvr != kCVReturnSuccess || !pxbuf) { CGImageRelease(cg); return; }
+
+        CVPixelBufferLockBaseAddress(pxbuf, 0);
+        void *base = CVPixelBufferGetBaseAddress(pxbuf);
+        size_t bpr = CVPixelBufferGetBytesPerRow(pxbuf);
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate(base, w, h, 8, bpr, cs,
+                                                 kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+        CGColorSpaceRelease(cs);
+        if (ctx) {
+            CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+            CGContextRelease(ctx);
+        }
+        CVPixelBufferUnlockBaseAddress(pxbuf, 0);
+        CGImageRelease(cg);
+
+        // Wait until the input is ready
+        while (!writerInput.isReadyForMoreMediaData) {
+            [NSThread sleepForTimeInterval:0.005];
+        }
+
+        if (![adaptor appendPixelBuffer:pxbuf withPresentationTime:pts]) {
+            writeErr = writer.error;
+        }
+        CVPixelBufferRelease(pxbuf);
+        pts = CMTimeAdd(pts, frameDuration);
+    }];
+
+    if (!setupOK) {
+        if (error) *error = setupErr;
+        return NO;
+    }
+    if (!writer) {
+        // No frames received
+        if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorStreamEncode
+                             userInfo:@{NSLocalizedDescriptionKey: @"No MJPEG frames received from stdin"}];
+        return NO;
+    }
+    if (writeErr) {
+        if (error) *error = writeErr;
+        return NO;
+    }
+
+    [writerInput markAsFinished];
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    [writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(sem); }];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_SEC));
+
+    if (writer.status == AVAssetWriterStatusFailed) {
+        if (error) *error = writer.error;
+        return NO;
+    }
+
+    NSMutableDictionary *out = [@{
+        @"operation": @"encode",
+        @"output": MVRelativePath(self.mediaOutput),
+        @"frameCount": @(CMTimeGetSeconds(pts) * fps),
+        @"fps": @(fps),
+    } mutableCopy];
     return [self emit:out error:error];
 }
 

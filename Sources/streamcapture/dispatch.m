@@ -113,9 +113,11 @@ BOOL MVDispatchStreamCapture(NSArray<NSString *> *args, NSError **error) {
                                 : (![operation isEqualToString:@"list-devices"] && isDir(output)) ? output
                                 : nil;
 
-    // streamcapture is a source (only produces output), so use stdoutPiped for stream detection
+    // For most operations, stream = stdoutPiped (source: device → MJPEG/MVAU out).
+    // For barcode in filter mode, stream = stdinPiped (MJPEG in → MJPEG out with X-MV headers).
+    BOOL stdinPiped  = !isatty(STDIN_FILENO);
     BOOL stdoutPiped = !isatty(STDOUT_FILENO);
-    BOOL stream      = !noStream && stdoutPiped;
+    BOOL stream = !noStream && ([operation isEqualToString:@"barcode"] ? stdinPiped : stdoutPiped);
 
     CaptureProcessor *p = [[CaptureProcessor alloc] init];
     p.operation        = operation;

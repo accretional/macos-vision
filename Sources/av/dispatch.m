@@ -1,4 +1,5 @@
 #import "av/main.h"
+#include <unistd.h>
 
 static BOOL looksLikeImage(NSString *p) {
     if (!p.length) return NO;
@@ -55,6 +56,8 @@ static void printHelp(void) {
         "  --voice <id>            Voice identifier (tts)\n"
         "  --factor <n>            Speed multiplier, e.g. 2.0 = 2x speed (retime)\n"
         "  --pitch-hop <n>         Hop size in audio frames for pitch analysis\n"
+        "  --fps <n>               Frame rate for encode S→F (MJPEG stdin → video file, default: 30)\n"
+        "  --no-stream             Disable auto-detection of pipe I/O\n"
         "  --debug                 Emit processing_ms in output\n"
     );
 }
@@ -76,8 +79,10 @@ BOOL MVDispatchAV(NSArray<NSString *> *args, NSError **error) {
     NSString *text         = nil;
     NSString *overlayPath  = nil;
     NSInteger pitchHop     = 0;
+    NSInteger fps          = 30;
     double factor          = 0.0;
     BOOL audioOnly         = NO;
+    BOOL noStream          = NO;
     BOOL debug             = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
@@ -101,7 +106,9 @@ BOOL MVDispatchAV(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--overlay"] && i+1 < (NSInteger)args.count)          { overlayPath  = args[++i]; }
         else if ([a isEqualToString:@"--factor"] && i+1 < (NSInteger)args.count)           { factor       = [args[++i] doubleValue]; }
         else if ([a isEqualToString:@"--pitch-hop"] && i+1 < (NSInteger)args.count)        { pitchHop     = [args[++i] integerValue]; }
+        else if ([a isEqualToString:@"--fps"] && i+1 < (NSInteger)args.count)               { fps          = [args[++i] integerValue]; }
         else if ([a isEqualToString:@"--audio-only"])                                       { audioOnly    = YES; }
+        else if ([a isEqualToString:@"--no-stream"])                                        { noStream     = YES; }
         else if ([a isEqualToString:@"--debug"])                                            { debug        = YES; }
         else {
             printHelp();
@@ -144,6 +151,19 @@ BOOL MVDispatchAV(NSArray<NSString *> *args, NSError **error) {
     // AV uses separate properties for media output and JSON envelope output
     p.mediaOutput = output;
     p.jsonOutput  = jsonOutput;
+    p.fps         = fps;
+
+    // Stream detection:
+    //   frames F→S: stdout piped + frames operation + input file provided
+    //   encode S→F: stdin piped + encode operation
+    BOOL stdinPiped  = !isatty(STDIN_FILENO);
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    if (!noStream) {
+        if ([operation isEqualToString:@"frames"] && stdoutPiped && inputPath.length)
+            p.streamOut = YES;
+        if ([operation isEqualToString:@"encode"] && stdinPiped && !inputPath.length)
+            p.stream = YES;
+    }
 
     return [p runWithError:error];
 }

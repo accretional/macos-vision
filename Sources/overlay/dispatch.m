@@ -18,9 +18,10 @@ static void printHelp(void) {
         "Render analysis results from any subcommand as an interactive SVG overlay.\n"
         "\n"
         "OPTIONS:\n"
-        "  --json <path>           JSON result file to render (required)\n"
+        "  --json <path>           JSON result file to render; use - to read from stdin\n"
         "  --input <path>          Override the image path embedded in the JSON\n"
-        "  --output <path>         Output .svg file path (default: <json-basename>.svg)\n"
+        "  --output <path>         Output file path. SVG: <json-basename>.svg (default).\n"
+        "                          Image extension (.jpg/.png): saves the last annotated MJPEG frame.\n"
         "  --json-output <path>    Write JSON envelope to this file (default: stdout)\n"
         "  --no-stream             Force file mode even when stdin/stdout are piped\n"
         "                          Stream mode is detected automatically when stdin is piped.\n"
@@ -61,7 +62,7 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
     }
 
     // JSON envelope: <stem>_overlay.json naming
-    NSString *jsonStem = stem(jsonPath);
+    NSString *jsonStem = [jsonPath isEqualToString:@"-"] ? @"stdin" : stem(jsonPath);
     NSString *jsonName = [[jsonStem stringByAppendingString:@"_overlay"] stringByAppendingPathExtension:@"json"];
     NSString *resolvedJSON = nil;
     if (jsonOutput.length && !isDir(jsonOutput))        resolvedJSON = jsonOutput;
@@ -69,9 +70,11 @@ BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error) {
     else if (output.length && isDir(output))            resolvedJSON = [output stringByAppendingPathComponent:jsonName];
     else if ([output.pathExtension.lowercaseString isEqualToString:@"json"]) resolvedJSON = output;
 
-    // Auto-detect stream mode: active when stdin is piped and --no-stream not set
+    // Auto-detect stream mode: active when stdin is piped, --no-stream not set,
+    // and --json - was not passed (--json - reads JSON from stdin, not MJPEG)
     BOOL stdinPiped = !isatty(STDIN_FILENO);
-    BOOL stream     = !noStream && stdinPiped;
+    BOOL jsonStdin  = [jsonPath isEqualToString:@"-"];
+    BOOL stream     = !noStream && stdinPiped && !jsonStdin;
 
     OverlayProcessor *p = [[OverlayProcessor alloc] init];
     p.jsonPath    = jsonPath;

@@ -5,6 +5,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
 #import <Cocoa/Cocoa.h>
+#import <Vision/Vision.h>
 #import <signal.h>
 #include <unistd.h>
 
@@ -251,7 +252,8 @@ static void CSpinUntilFlagOrStop(volatile BOOL *flag, NSTimeInterval duration) {
         return self.stream ? [self runVideoStreamWithError:error] : [self runVideoWithError:error];
     if ([self.operation isEqualToString:@"screen-record"])
         return self.stream ? [self runScreenRecordStreamWithError:error] : [self runScreenRecordWithError:error];
-    if ([self.operation isEqualToString:@"barcode"])      return [self runBarcodeWithError:error];
+    if ([self.operation isEqualToString:@"barcode"])
+        return self.stream ? [self runBarcodeStreamWithError:error] : [self runBarcodeWithError:error];
     if ([self.operation isEqualToString:@"list-devices"]) return [self runListDevicesWithError:error];
     return YES;
 }
@@ -1193,6 +1195,86 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
 
     [session stopRunning];
     signal(SIGINT, SIG_DFL);
+    return YES;
+}
+
+// ── barcode stream filter (MJPEG in → MJPEG out + X-MV-streamcapture-barcode) ─
+
+- (BOOL)runBarcodeStreamWithError:(NSError **)error {
+    // Build Vision barcode symbol type filter from --types
+    NSArray<NSString *> *symbologyFilter = nil;
+    if (self.types.length) {
+        NSMutableArray *syms = [NSMutableArray array];
+        // Map VN symbol type names from user-friendly names via the AV map,
+        // then convert to VNBarcodeSymbology equivalents.
+        NSDictionary<NSString *, NSString *> *vnMap = @{
+            @"qr":         VNBarcodeSymbologyQR,
+            @"ean13":      VNBarcodeSymbologyEAN13,
+            @"ean8":       VNBarcodeSymbologyEAN8,
+            @"upce":       VNBarcodeSymbologyUPCE,
+            @"code128":    VNBarcodeSymbologyCode128,
+            @"code39":     VNBarcodeSymbologyCode39,
+            @"code93":     VNBarcodeSymbologyCode93,
+            @"pdf417":     VNBarcodeSymbologyPDF417,
+            @"aztec":      VNBarcodeSymbologyAztec,
+            @"datamatrix": VNBarcodeSymbologyDataMatrix,
+            @"itf14":      VNBarcodeSymbologyITF14,
+            @"i2of5":      VNBarcodeSymbologyI2of5,
+        };
+        for (NSString *name in [self.types componentsSeparatedByString:@","]) {
+            NSString *t = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].lowercaseString;
+            NSString *sym = vnMap[t];
+            if (sym) [syms addObject:sym];
+            else fprintf(stderr, "streamcapture: unknown barcode type '%s'\n", t.UTF8String);
+        }
+        symbologyFilter = [syms copy];
+    }
+
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
+        NSMutableDictionary<NSString *, NSString *> *outHeaders = [NSMutableDictionary dictionaryWithDictionary:inHeaders];
+        [outHeaders removeObjectForKey:@"Content-Type"];
+        [outHeaders removeObjectForKey:@"Content-Length"];
+
+        // Decode JPEG → CGImage for Vision
+        CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
+        CGImageRef cg = src ? CGImageSourceCreateImageAtIndex(src, 0, nil) : NULL;
+        if (src) CFRelease(src);
+
+        if (cg) {
+            VNDetectBarcodesRequest *req = [[VNDetectBarcodesRequest alloc] init];
+            if (symbologyFilter.count) req.symbologies = symbologyFilter;
+            VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+            CGImageRelease(cg);
+            NSError *vnErr = nil;
+            if ([handler performRequests:@[req] error:&vnErr] && req.results.count) {
+                NSMutableArray *barcodes = [NSMutableArray array];
+                for (VNBarcodeObservation *obs in req.results) {
+                    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+                    entry[@"type"]    = obs.symbology ?: @"unknown";
+                    if (obs.payloadStringValue) entry[@"payload"] = obs.payloadStringValue;
+                    CGRect b = obs.boundingBox;
+                    entry[@"bounds"] = @{
+                        @"x": @(b.origin.x), @"y": @(1.0 - b.origin.y - b.size.height),
+                        @"width": @(b.size.width), @"height": @(b.size.height),
+                    };
+                    [barcodes addObject:entry];
+                }
+                NSDictionary *result = @{ @"operation": @"barcode", @"barcodes": barcodes };
+                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+                if (jsonData)
+                    outHeaders[@"X-MV-streamcapture-barcode"] =
+                        [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+            }
+        } else {
+            // No CGImage — still pass frame through without header
+        }
+
+        [writer writeFrame:jpeg extraHeaders:outHeaders];
+    }];
+
     return YES;
 }
 

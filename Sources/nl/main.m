@@ -1,5 +1,6 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
 #import <NaturalLanguage/NaturalLanguage.h>
 
 static NSString * const NLProcErrorDomain = @"NLProcError";
@@ -67,6 +68,7 @@ static NLTokenUnit NLUnitFromName(NSString *name) {
 - (nullable NSDictionary *)runDistanceWithError:(NSError **)error;
 - (nullable NSDictionary *)runContextualEmbedOnText:(NSString *)text error:(NSError **)error;
 - (nullable NSDictionary *)runClassifyOnText:(NSString *)text error:(NSError **)error;
+- (BOOL)runStreamWithError:(NSError **)error;
 @end
 
 @implementation NLProcessor
@@ -443,7 +445,76 @@ static NLTokenUnit NLUnitFromName(NSString *name) {
     return base;
 }
 
+// ── S→S / S→F stream filter ───────────────────────────────────────────────────
+// Reads MJPEG frames, extracts OCR text from X-MV-ocr-recognize header,
+// runs the NL operation, attaches X-MV-nl-<operation> header, passes frame through.
+
+- (BOOL)runStreamWithError:(NSError **)error {
+    // stream-only ops not useful in a pipeline; distance/embed-word/similar require
+    // no text input, so we skip them in stream mode
+    NSArray *noStreamOps = @[@"distance", @"contextual-embed", @"classify"];
+    if ([noStreamOps containsObject:self.operation]) {
+        if (error) *error = [NSError errorWithDomain:NLProcErrorDomain code:NLProcessorErrorUnknownOp
+                             userInfo:@{NSLocalizedDescriptionKey:
+                                 [NSString stringWithFormat:@"nl stream mode does not support '%@'", self.operation]}];
+        return NO;
+    }
+
+    NSString *headerKey = [NSString stringWithFormat:@"X-MV-nl-%@", self.operation];
+
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    writer.ndjsonOutputPath = self.ndjsonOutput;
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
+        NSMutableDictionary<NSString *, NSString *> *outHeaders = [NSMutableDictionary dictionaryWithDictionary:inHeaders];
+        [outHeaders removeObjectForKey:@"Content-Type"];
+        [outHeaders removeObjectForKey:@"Content-Length"];
+
+        // Extract text from X-MV-ocr-recognize header
+        NSString *ocrHeaderVal = inHeaders[@"X-MV-ocr-recognize"];
+        NSString *text = nil;
+        if (ocrHeaderVal.length) {
+            NSData *d = [ocrHeaderVal dataUsingEncoding:NSUTF8StringEncoding];
+            NSDictionary *ocrJSON = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+            // Prefer the pre-joined "texts" field; fall back to joining observations
+            text = ocrJSON[@"texts"];
+            if (!text.length) {
+                NSArray *obs = ocrJSON[@"observations"];
+                if ([obs isKindOfClass:[NSArray class]]) {
+                    NSMutableArray *parts = [NSMutableArray array];
+                    for (NSDictionary *o in obs) {
+                        NSString *t = o[@"text"];
+                        if (t.length) [parts addObject:t];
+                    }
+                    text = [parts componentsJoinedByString:@"\n"];
+                }
+            }
+        }
+
+        if (text.length) {
+            NSError *opErr = nil;
+            NSDictionary *payload = nil;
+            if ([self.operation isEqualToString:@"embed"] && (self.word.length || self.similar.length)) {
+                payload = [self runEmbedOnText:@"" error:&opErr];
+            } else {
+                payload = [self runOperationOnText:text source:nil error:&opErr];
+            }
+            if (payload) {
+                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+                if (jsonData)
+                    outHeaders[headerKey] = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+            }
+        }
+
+        [writer writeFrame:jpeg extraHeaders:outHeaders];
+    }];
+
+    return YES;
+}
+
 - (BOOL)runWithError:(NSError **)error {
+    if (self.stream) return [self runStreamWithError:error]; // S→S or S→F
     NSString *inputLabel = self.input ?: self.text ?: @"";
 
     if ([self.operation isEqualToString:@"distance"]) {
