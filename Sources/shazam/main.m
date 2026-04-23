@@ -11,6 +11,7 @@ static NSString * const ShazamErrorDomain = @"ShazamProcessorError";
 API_AVAILABLE(macos(12.0))
 @interface SHAZDelegate : NSObject <SHSessionDelegate>
 @property (nonatomic, strong) NSDictionary *result;
+@property (nonatomic, strong) NSError      *matchError;
 @property (nonatomic)         dispatch_semaphore_t semaphore;
 - (instancetype)initWithSemaphore:(dispatch_semaphore_t)sem;
 @end
@@ -43,6 +44,7 @@ API_AVAILABLE(macos(12.0))
 }
 
 - (void)session:(SHSession *)session didNotFindMatchForSignature:(SHSignature *)signature error:(NSError *)error {
+    if (error) self.matchError = error;
     dispatch_semaphore_signal(self.semaphore);
 }
 
@@ -131,6 +133,22 @@ API_AVAILABLE(macos(12.0))
         session.delegate = delegate;
         [session matchSignature:sig];
         dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
+        (void)session; // keep session alive until semaphore returns; ARC would otherwise
+                       // release it after matchSignature:, cancelling the pending match
+        if (delegate.matchError) {
+            NSError *e = delegate.matchError;
+            if ([e.domain isEqualToString:@"com.apple.ShazamKit"] && e.code == 201) {
+                e = [NSError errorWithDomain:e.domain code:e.code userInfo:@{
+                    NSLocalizedDescriptionKey:
+                        @"ShazamKit cloud matching requires the com.apple.developer.shazamkit "
+                        @"entitlement signed with a real Apple Developer identity and provisioning "
+                        @"profile. Ad-hoc signing is not sufficient. Use 'match-custom' with a "
+                        @"local .shazamcatalog for offline matching without entitlements."
+                }];
+            }
+            if (error) *error = e;
+            return nil;
+        }
         return delegate.result;
     } else {
         if (error) {
@@ -165,7 +183,11 @@ API_AVAILABLE(macos(12.0))
         session.delegate = delegate;
         [session matchSignature:sig];
         dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
-
+        (void)session;
+        if (delegate.matchError) {
+            if (error) *error = delegate.matchError;
+            return nil;
+        }
         NSMutableDictionary *result = [delegate.result mutableCopy];
         if (self.catalog.length) {
             result[@"catalog"] = MVRelativePath(self.catalog);
@@ -261,23 +283,77 @@ API_AVAILABLE(macos(12.0))
     AVAudioFile *audioFile = [[AVAudioFile alloc] initForReading:url error:error];
     if (!audioFile) return nil;
 
-    AVAudioFormat        *format = audioFile.processingFormat;
-    SHSignatureGenerator *gen    = [[SHSignatureGenerator alloc] init];
-    AVAudioFrameCount     cap    = 8192;
-    AVAudioPCMBuffer     *buf    = [[AVAudioPCMBuffer alloc] initWithPCMFormat:format frameCapacity:cap];
-    if (!buf) {
+    AVAudioFormat *srcFormat = audioFile.processingFormat;
+
+    // SHSignatureGenerator works best with mono Float32 PCM at 44100 Hz.
+    // Read up to 20 s of source frames, convert in one shot, then feed to the generator.
+    AVAudioFramePosition maxSrcFrames = (AVAudioFramePosition)(srcFormat.sampleRate * 20.0);
+    AVAudioFrameCount    toRead       = (AVAudioFrameCount)MIN(audioFile.length, maxSrcFrames);
+
+    AVAudioPCMBuffer *srcBuf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:srcFormat frameCapacity:toRead];
+    if (!srcBuf) {
         if (error) *error = [NSError errorWithDomain:ShazamErrorDomain code:30 userInfo:nil];
         return nil;
     }
+    if (![audioFile readIntoBuffer:srcBuf frameCount:toRead error:error]) return nil;
 
-    AVAudioFramePosition maxFrames = (AVAudioFramePosition)(format.sampleRate * 20.0);
-    AVAudioFramePosition pos = 0;
-    while (pos < audioFile.length && pos < maxFrames) {
-        AVAudioFrameCount toRead = (AVAudioFrameCount)MIN((AVAudioFramePosition)cap, audioFile.length - pos);
-        buf.frameLength = toRead;
-        if (![audioFile readIntoBuffer:buf frameCount:toRead error:error]) return nil;
-        if (![gen appendBuffer:buf atTime:nil error:error]) return nil;
-        pos += (AVAudioFramePosition)toRead;
+    // Convert to 44100 Hz mono Float32 if the source format differs.
+    AVAudioFormat *shazamFormat = [[AVAudioFormat alloc]
+        initWithCommonFormat:AVAudioPCMFormatFloat32
+                  sampleRate:44100.0
+                    channels:1
+                 interleaved:NO];
+
+    AVAudioPCMBuffer *feedBuf;
+    if (srcFormat.sampleRate == 44100.0 && srcFormat.channelCount == 1
+            && srcFormat.commonFormat == AVAudioPCMFormatFloat32) {
+        feedBuf = srcBuf;  // already in the right format
+    } else {
+        AVAudioConverter *converter = [[AVAudioConverter alloc] initFromFormat:srcFormat toFormat:shazamFormat];
+        if (!converter) {
+            if (error) *error = [NSError errorWithDomain:ShazamErrorDomain code:31
+                                                 userInfo:@{NSLocalizedDescriptionKey: @"Could not create audio format converter for ShazamKit"}];
+            return nil;
+        }
+        AVAudioFrameCount outCap = (AVAudioFrameCount)ceil((double)toRead * 44100.0 / srcFormat.sampleRate) + 512;
+        feedBuf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:shazamFormat frameCapacity:outCap];
+        if (!feedBuf) {
+            if (error) *error = [NSError errorWithDomain:ShazamErrorDomain code:32 userInfo:nil];
+            return nil;
+        }
+        // Single-shot convert: the source buffer is fully loaded, so we signal EndOfStream after
+        // providing it once.
+        __block BOOL provided = NO;
+        AVAudioConverterOutputStatus status = [converter convertToBuffer:feedBuf error:error
+            withInputFromBlock:^AVAudioBuffer *(AVAudioPacketCount inNumberOfPackets, AVAudioConverterInputStatus *outStatus) {
+                if (provided) {
+                    *outStatus = AVAudioConverterInputStatus_EndOfStream;
+                    return nil;
+                }
+                provided     = YES;
+                *outStatus   = AVAudioConverterInputStatus_HaveData;
+                return srcBuf;
+            }];
+        if (status == AVAudioConverterOutputStatus_Error) return nil;
+    }
+
+    // Feed converted audio to the generator in 8 k-frame chunks.
+    SHSignatureGenerator *gen = [[SHSignatureGenerator alloc] init];
+    AVAudioFrameCount     cap = 8192;
+    AVAudioFrameCount     total = feedBuf.frameLength;
+    AVAudioFrameCount     pos   = 0;
+
+    while (pos < total) {
+        AVAudioFrameCount chunkSize = MIN(cap, total - pos);
+        // Sub-buffer pointing into feedBuf's channel data at the current offset.
+        AVAudioPCMBuffer *chunk = [[AVAudioPCMBuffer alloc] initWithPCMFormat:shazamFormat frameCapacity:chunkSize];
+        if (!chunk) break;
+        chunk.frameLength = chunkSize;
+        memcpy(chunk.floatChannelData[0],
+               feedBuf.floatChannelData[0] + pos,
+               chunkSize * sizeof(float));
+        if (![gen appendBuffer:chunk atTime:nil error:error]) return nil;
+        pos += chunkSize;
     }
     return [gen signature];
 }

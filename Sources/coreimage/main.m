@@ -103,12 +103,14 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
 - (BOOL)runStreamWithError:(NSError **)error {
     NSString *op = self.operation.length ? self.operation : @"apply-filter";
 
-    // list-filters / suggest-filters have no pixel transform; not useful in S→S
-    if ([op isEqualToString:@"list-filters"] || [op isEqualToString:@"suggest-filters"]) {
+    // list-filters has no pixel transform; suggest-filters only streams when --apply is set
+    if ([op isEqualToString:@"list-filters"] ||
+        ([op isEqualToString:@"suggest-filters"] && !self.applyFilters)) {
         if (error) *error = [NSError errorWithDomain:CIProcessorErrorDomain
                                                code:CIProcessorErrorUnknownOperation
                              userInfo:@{NSLocalizedDescriptionKey:
-                                 [NSString stringWithFormat:@"coreimage '%@' has no stream mode; omit --no-stream or use a different operation", op]}];
+                                 [NSString stringWithFormat:@"coreimage '%@' has no stream mode; omit --no-stream or use a different operation%@",
+                                  op, [op isEqualToString:@"suggest-filters"] ? @" (or add --apply to render the suggested filters)" : @""]}];
         return NO;
     }
 
@@ -171,7 +173,8 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
             if (outputCI && (isinf(outputCI.extent.size.width) || isinf(outputCI.extent.size.height))) {
                 outputCI = [outputCI imageByCroppingToRect:frameCI.extent];
             }
-        } else if ([op isEqualToString:@"auto-adjust"]) {
+        } else if ([op isEqualToString:@"auto-adjust"] ||
+                   [op isEqualToString:@"suggest-filters"]) {
             NSArray<CIFilter *> *adjustFilters = [frameCI autoAdjustmentFiltersWithOptions:nil];
             CIImage *current = frameCI;
             for (CIFilter *f in adjustFilters) {
@@ -232,6 +235,22 @@ typedef NS_ENUM(NSInteger, CIProcessorErrorCode) {
             ? [self suggestFiltersWithError:error]
             : [self autoAdjustWithError:error];
         if (!result) return NO;
+
+        // When suggest-filters --apply rendered an output, use it as the stream frame
+        NSString *outPath = result[@"output"];
+        if (outPath.length) {
+            if (![outPath hasPrefix:@"/"]) {
+                outPath = [[[NSFileManager defaultManager] currentDirectoryPath]
+                           stringByAppendingPathComponent:outPath];
+            }
+            CIImage *ciImg = [CIImage imageWithContentsOfURL:[NSURL fileURLWithPath:outPath]];
+            if (ciImg) {
+                CIContext *ctx = [CIContext contextWithOptions:nil];
+                CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+                frameJpeg = [ctx JPEGRepresentationOfImage:ciImg colorSpace:cs options:@{}];
+                CGColorSpaceRelease(cs);
+            }
+        }
     }
 
     // Fall back to original image as JPEG frame

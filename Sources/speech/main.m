@@ -341,6 +341,8 @@ static NSString * const SpeechErrorDomain = @"SpeechProcessorError";
             }
             done = YES;
         } else {
+            // SFTranscriptionSegment.timestamp/duration are always 0 on partial results;
+            // timing data is only valid on the final result. Emit transcript text only.
             [self writeDict:@{@"partial": @YES, @"transcript": tx} toResultFd:resultFd];
         }
     }];

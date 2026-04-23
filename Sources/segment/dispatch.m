@@ -30,7 +30,7 @@ static void printHelp(void) {
         "  --output <path>         Output mask image file, directory, or .json path\n"
         "  --json-output <path>    Write JSON envelope to this file (default: stdout)\n"
         "  --artifacts-dir <dir>   Write mask images here\n"
-        "  --no-stream             Force file mode even when stdin is piped (future stream mode)\n"
+        "  --no-stream             Force file mode even when stdin is piped\n"
     );
 }
 

@@ -854,12 +854,14 @@ static NSData *OVAnnotateJPEG(NSData *jpeg, NSArray<SVGShape *> *shapes, BOOL sh
     CGColorSpaceRelease(cs);
     if (!ctx) { CGImageRelease(srcImg); return nil; }
 
-    // Flip CG's bottom-left origin to top-left so (0,0) = top-left for both image and shape drawing.
-    // OVDrawShapesOnContext expects this flip to be active (normalized coords: (0,0) = top-left).
-    CGContextTranslateCTM(ctx, 0, (CGFloat)h);
-    CGContextScaleCTM(ctx, 1.0, -1.0);
+    // Draw image first in native CG coordinates (bottom-left origin) so it appears unflipped.
     CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), srcImg);
     CGImageRelease(srcImg);
+
+    // Now flip to top-left origin for shape drawing.
+    // OVDrawShapesOnContext expects (0,0) = top-left (normalized coords from Vision subcommands).
+    CGContextTranslateCTM(ctx, 0, (CGFloat)h);
+    CGContextScaleCTM(ctx, 1.0, -1.0);
 
     OVDrawShapesOnContext(ctx, shapes, (CGFloat)w, (CGFloat)h, showLabels);
 

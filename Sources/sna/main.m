@@ -8,7 +8,7 @@
 
 static NSString * const SNAErrorDomain = @"SNAProcessorError";
 
-// ── Classification observer ───────────────────────────────────────────────────
+// ── Classification observer (batch — file mode) ───────────────────────────────
 
 @interface SNAObserver : NSObject <SNResultsObserving>
 @property (nonatomic, strong) NSMutableArray<NSDictionary *> *windows;
@@ -44,6 +44,53 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
         @"duration": @(round(CMTimeGetSeconds(cr.timeRange.duration) * 1000.0) / 1000.0),
         @"classifications": top,
     }];
+}
+
+- (void)request:(id<SNRequest>)request didFailWithError:(NSError *)error {
+    fprintf(stderr, "SoundAnalysis error: %s\n", error.localizedDescription.UTF8String);
+}
+
+- (void)requestDidComplete:(id<SNRequest>)request {}
+
+@end
+
+// ── Classification observer (stream — emits NDJSON per window) ────────────────
+
+@interface SNAStreamObserver : NSObject <SNResultsObserving>
+@property (nonatomic, assign) NSInteger topK;
+- (instancetype)initWithTopK:(NSInteger)topK;
+@end
+
+@implementation SNAStreamObserver
+
+- (instancetype)initWithTopK:(NSInteger)topK {
+    if (self = [super init]) { _topK = topK; }
+    return self;
+}
+
+- (void)request:(id<SNRequest>)request didProduceResult:(id<SNResult>)result {
+    if (![result isKindOfClass:[SNClassificationResult class]]) return;
+    SNClassificationResult *cr = (SNClassificationResult *)result;
+    NSArray<SNClassification *> *all = cr.classifications;
+    NSInteger count = MIN(self.topK, (NSInteger)all.count);
+    NSMutableArray *top = [NSMutableArray arrayWithCapacity:(NSUInteger)count];
+    for (NSInteger i = 0; i < count; i++) {
+        SNClassification *c = all[(NSUInteger)i];
+        [top addObject:@{
+            @"identifier": c.identifier,
+            @"confidence": @(round(c.confidence * 10000.0) / 10000.0),
+        }];
+    }
+    NSDictionary *window = @{
+        @"time":            @(round(CMTimeGetSeconds(cr.timeRange.start)    * 1000.0) / 1000.0),
+        @"duration":        @(round(CMTimeGetSeconds(cr.timeRange.duration) * 1000.0) / 1000.0),
+        @"classifications": top,
+    };
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:window options:0 error:nil];
+    if (jsonData) {
+        write(STDOUT_FILENO, jsonData.bytes, jsonData.length);
+        write(STDOUT_FILENO, "\n", 1);
+    }
 }
 
 - (void)request:(id<SNRequest>)request didFailWithError:(NSError *)error {
@@ -340,6 +387,8 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
 }
 
 // ── MVAU stream-in mode ───────────────────────────────────────────────────────
+// Uses SNAudioStreamAnalyzer to process chunks as they arrive and emit
+// NDJSON per classification window — no buffering, no temp files.
 
 - (BOOL)runAudioStreamWithError:(NSError **)error {
     MVAudioFormat fallback;
@@ -349,52 +398,61 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
 
     MVAudioReader *reader = [[MVAudioReader alloc] initWithFileDescriptor:STDIN_FILENO
                                                             fallbackFormat:fallback];
-    NSError *readErr = nil;
-    NSData *pcmData = [reader readAllData:&readErr];
-    if (!pcmData || pcmData.length == 0) {
-        if (error) *error = readErr ?: [NSError errorWithDomain:SNAErrorDomain code:60
-                                          userInfo:@{NSLocalizedDescriptionKey: @"No audio data received from stdin"}];
-        return NO;
-    }
-
     MVAudioFormat fmt = reader.format;
-
-    // Write PCM to a temp WAV file for SoundAnalysis
-    NSString *tmpName = [[NSUUID UUID].UUIDString stringByAppendingPathExtension:@"wav"];
-    NSURL *tmpWav = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:tmpName]];
-
-    NSDictionary *wavSettings = @{
-        AVFormatIDKey:             @(kAudioFormatLinearPCM),
-        AVSampleRateKey:           @(fmt.sampleRate),
-        AVNumberOfChannelsKey:     @(fmt.channels),
-        AVLinearPCMBitDepthKey:    @(fmt.bitDepth),
-        AVLinearPCMIsFloatKey:     @NO,
-        AVLinearPCMIsBigEndianKey: @NO,
-    };
-    NSError *wavErr = nil;
-    AVAudioFile *wavFile = [[AVAudioFile alloc] initForWriting:tmpWav settings:wavSettings error:&wavErr];
-    if (!wavFile) { if (error) *error = wavErr; return NO; }
 
     AVAudioFormat *avFmt = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
                                                             sampleRate:(double)fmt.sampleRate
                                                               channels:(AVAudioChannelCount)fmt.channels
                                                            interleaved:YES];
-    AVAudioFrameCount frameCount = (AVAudioFrameCount)(pcmData.length / (fmt.channels * (fmt.bitDepth / 8)));
-    AVAudioPCMBuffer *pcmBuf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:avFmt frameCapacity:frameCount];
-    pcmBuf.frameLength = frameCount;
-    memcpy(pcmBuf.int16ChannelData[0], pcmData.bytes, pcmData.length);
 
-    if (![wavFile writeFromBuffer:pcmBuf error:error]) {
-        [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
-        return NO;
+    SNAudioStreamAnalyzer *analyzer = [[SNAudioStreamAnalyzer alloc] initWithFormat:avFmt];
+
+    // Build the request
+    SNClassifySoundRequest *request = nil;
+    if ([self.operation isEqualToString:@"classify-custom"]) {
+        if (!self.modelPath.length) {
+            if (error) *error = [NSError errorWithDomain:SNAErrorDomain code:40
+                userInfo:@{NSLocalizedDescriptionKey: @"classify-custom requires --model <path>"}];
+            return NO;
+        }
+        MLModel *mlModel = [MLModel modelWithContentsOfURL:[NSURL fileURLWithPath:self.modelPath]
+                                                     error:error];
+        if (!mlModel) return NO;
+        request = [[SNClassifySoundRequest alloc] initWithMLModel:mlModel error:error];
+    } else {
+        if (@available(macOS 12.0, *)) {
+            request = [[SNClassifySoundRequest alloc]
+                initWithClassifierIdentifier:SNClassifierIdentifierVersion1 error:error];
+        } else {
+            if (error) *error = [NSError errorWithDomain:SNAErrorDomain code:30
+                userInfo:@{NSLocalizedDescriptionKey: @"classify stream requires macOS 12.0+"}];
+            return NO;
+        }
     }
-    wavFile = nil;
+    if (!request) return NO;
+    if (![self configureRequest:request error:error]) return NO;
 
-    // Now run the regular classify operation on the temp file
-    self.inputPath = tmpWav.path;
-    BOOL ok = [self runWithError:error];
-    [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
-    return ok;
+    SNAStreamObserver *observer = [[SNAStreamObserver alloc] initWithTopK:self.topk];
+    if (![analyzer addRequest:request withObserver:observer error:error]) return NO;
+
+    // Feed ~250 ms chunks to the stream analyzer as they arrive
+    AVAudioFrameCount bytesPerFrame = (AVAudioFrameCount)(fmt.channels * (fmt.bitDepth / 8));
+    NSUInteger chunkSize = (NSUInteger)(fmt.sampleRate * bytesPerFrame / 4);
+
+    __block AVAudioFramePosition position = 0;
+    [reader readChunksOfSize:chunkSize handler:^(NSData *pcmChunk) {
+        AVAudioFrameCount frameCount = (AVAudioFrameCount)(pcmChunk.length / bytesPerFrame);
+        if (frameCount == 0) return;
+        AVAudioPCMBuffer *buf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:avFmt
+                                                               frameCapacity:frameCount];
+        buf.frameLength = frameCount;
+        memcpy(buf.int16ChannelData[0], pcmChunk.bytes, pcmChunk.length);
+        [analyzer analyzeAudioBuffer:buf atAudioFramePosition:position];
+        position += frameCount;
+    }];
+
+    [analyzer completeAnalysis];
+    return YES;
 }
 
 @end
