@@ -1,4 +1,5 @@
 #import "nl/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -41,6 +42,7 @@ static void printHelp(void) {
         "  --model <path>          CoreML model path for classify\n"
         "  --topk <n>              Top-K results (default: 3)\n"
         "  --debug                 Emit processing_ms in output\n"
+        "  --no-stream             Disable auto-detection of pipe I/O; always use file mode\n"
     );
 }
 
@@ -59,7 +61,8 @@ BOOL MVDispatchNL(NSArray<NSString *> *args, NSError **error) {
     NSString *similar      = nil;
     NSString *modelPath    = nil;
     NSInteger topk         = 3;
-    BOOL debug = NO;
+    BOOL debug   = NO;
+    BOOL noStream = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -79,9 +82,9 @@ BOOL MVDispatchNL(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--similar"] && i+1 < (NSInteger)args.count)          { similar   = args[++i]; }
         else if ([a isEqualToString:@"--model"] && i+1 < (NSInteger)args.count)            { modelPath = args[++i]; }
         else if ([a isEqualToString:@"--topk"] && i+1 < (NSInteger)args.count)             { topk      = [args[++i] integerValue]; }
-        else if ([a isEqualToString:@"--debug"]) { debug = YES; }
+        else if ([a isEqualToString:@"--debug"])     { debug = YES; }
+        else if ([a isEqualToString:@"--no-stream"]) { noStream = YES; }
         else {
-            fprintf(stderr, "nl: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"nl: unknown option '%@'", a]}];
@@ -96,6 +99,11 @@ BOOL MVDispatchNL(NSArray<NSString *> *args, NSError **error) {
     else if (jsonOutput.length && isDir(jsonOutput))    resolvedJSON = [[jsonOutput stringByAppendingPathComponent:jsonStem] stringByAppendingPathExtension:@"json"];
     else if (output.length && isDir(output))            resolvedJSON = [[output stringByAppendingPathComponent:jsonStem] stringByAppendingPathExtension:@"json"];
     else if ([output.pathExtension.lowercaseString isEqualToString:@"json"]) resolvedJSON = output;
+
+    BOOL stdinPiped  = !isatty(STDIN_FILENO);
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    BOOL streamIn    = !noStream && stdinPiped && !inputPath.length && !text.length;
+    BOOL streamOut   = !noStream && stdoutPiped;
 
     NLProcessor *p = [[NLProcessor alloc] init];
     p.text       = text;
@@ -112,5 +120,8 @@ BOOL MVDispatchNL(NSArray<NSString *> *args, NSError **error) {
     p.modelPath  = modelPath;
     p.jsonOutput = resolvedJSON;
     p.debug      = debug;
+    p.stream     = streamIn;
+    p.streamOut  = streamOut;
+    if ((streamIn || streamOut) && output.length) p.ndjsonOutput = output;
     return [p runWithError:error];
 }

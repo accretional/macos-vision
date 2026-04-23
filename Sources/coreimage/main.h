@@ -25,6 +25,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// When YES and operation is list-filters, return category metadata instead of filter names.
 @property (nonatomic, assign) BOOL categoryOnly;
 @property (nonatomic, assign) BOOL debug;
+/// Read MJPEG from stdin. Active when stdin piped and no --input given.
+@property (nonatomic, assign) BOOL stream;
+/// Write MJPEG to stdout. Active when stdout piped.
+@property (nonatomic, assign) BOOL streamOut;
+/// When set in stream mode, dual-write NDJSON lines to this file alongside MJPEG stdout.
+@property (nonatomic, copy, nullable) NSString *ndjsonOutput;
 
 - (BOOL)runWithError:(NSError **)error;
 

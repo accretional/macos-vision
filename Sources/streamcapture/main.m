@@ -1,9 +1,13 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVMjpegStream.h"
+#import "common/MVAudioStream.h"
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
 #import <Cocoa/Cocoa.h>
+#import <Vision/Vision.h>
 #import <signal.h>
+#include <unistd.h>
 
 static NSString *const CaptureErrorDomain = @"CaptureError";
 
@@ -63,15 +67,73 @@ static void CPrintNDJSON(NSDictionary *obj) {
 @interface CaptureMovieDelegate : NSObject <AVCaptureFileOutputRecordingDelegate>
 @property (nonatomic) BOOL finished;
 @property (nonatomic, strong, nullable) NSError *recordingError;
+@property (nonatomic) dispatch_semaphore_t doneSem;
 @end
 
 @implementation CaptureMovieDelegate
+- (instancetype)init {
+    if (self = [super init]) {
+        _doneSem = dispatch_semaphore_create(0);
+    }
+    return self;
+}
 - (void)captureOutput:(AVCaptureFileOutput *)output
     didFinishRecordingToOutputFileAtURL:(NSURL *)url
                         fromConnections:(NSArray<AVCaptureConnection *> *)connections
                                   error:(NSError *)error {
     self.recordingError = error;
     self.finished = YES;
+    dispatch_semaphore_signal(self.doneSem);
+}
+@end
+
+// ── Stream video delegate ─────────────────────────────────────────────────────
+
+@interface CaptureStreamDelegate : NSObject <AVCaptureVideoDataOutputSampleBufferDelegate>
+@property (nonatomic, strong) MVMjpegWriter *writer;
+@property (nonatomic, strong) CIContext *ciContext;
+/// JPEG compression quality in [0.0, 1.0] (default 0.85).
+@property (nonatomic, assign) double jpegQuality;
+/// Minimum interval between frames in seconds; 0 = no throttle.
+@property (nonatomic, assign) NSTimeInterval frameInterval;
+@end
+
+@implementation CaptureStreamDelegate {
+    NSDate *_lastFrameTime;
+}
+
+- (instancetype)init {
+    if ((self = [super init])) {
+        _jpegQuality   = 0.85;
+        _frameInterval = 0.0;
+    }
+    return self;
+}
+
+- (void)captureOutput:(AVCaptureOutput *)output
+    didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
+         fromConnection:(AVCaptureConnection *)connection {
+    // FPS throttle: drop frames that arrive sooner than frameInterval
+    if (_frameInterval > 0.0 && _lastFrameTime) {
+        NSTimeInterval elapsed = -[_lastFrameTime timeIntervalSinceNow];
+        if (elapsed < _frameInterval) return;
+    }
+
+    CVImageBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+    if (!pixelBuffer) return;
+    CIImage *ciImage = [[CIImage alloc] initWithCVImageBuffer:pixelBuffer];
+    // Correct built-in camera orientation (frames arrive rotated 180°)
+    // ciImage = [ciImage imageByApplyingCGOrientation:kCGImagePropertyOrientationDown];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    NSData *jpeg = [self.ciContext
+        JPEGRepresentationOfImage:ciImage
+                      colorSpace:cs
+                         options:@{(id)kCGImageDestinationLossyCompressionQuality: @(_jpegQuality)}];
+    CGColorSpaceRelease(cs);
+    if (jpeg) {
+        [self.writer writeFrame:jpeg extraHeaders:nil];
+        _lastFrameTime = [NSDate date];
+    }
 }
 @end
 
@@ -165,11 +227,16 @@ static void CSpinUntilFlagOrStop(volatile BOOL *flag, NSTimeInterval duration) {
 
 - (instancetype)init {
     if (self = [super init]) {
-        _operation    = @"screenshot";
-        _format       = @"mp4";
-        _displayIndex = 0;
-        _deviceIndex  = 0;
-        _duration     = 0;
+        _operation       = @"screenshot";
+        _format          = @"mp4";
+        _displayIndex    = 0;
+        _deviceIndex     = 0;
+        _duration        = 0;
+        _fps             = 30;
+        _jpegQuality     = 0.85;
+        _audioSampleRate = 16000;
+        _audioChannels   = 1;
+        _audioBitDepth   = 16;
     }
     return self;
 }
@@ -183,12 +250,18 @@ static void CSpinUntilFlagOrStop(volatile BOOL *flag, NSTimeInterval duration) {
                  self.operation, [validOps componentsJoinedByString:@", "]]}];
         return NO;
     }
-    if ([self.operation isEqualToString:@"screenshot"])   return [self runScreenshotWithError:error];
-    if ([self.operation isEqualToString:@"photo"])        return [self runPhotoWithError:error];
-    if ([self.operation isEqualToString:@"audio"])        return [self runAudioWithError:error];
-    if ([self.operation isEqualToString:@"video"])        return [self runVideoWithError:error];
-    if ([self.operation isEqualToString:@"screen-record"])return [self runScreenRecordWithError:error];
-    if ([self.operation isEqualToString:@"barcode"])      return [self runBarcodeWithError:error];
+    if ([self.operation isEqualToString:@"screenshot"])
+        return self.stream ? [self runScreenshotStreamWithError:error] : [self runScreenshotWithError:error];
+    if ([self.operation isEqualToString:@"photo"])
+        return self.stream ? [self runPhotoStreamWithError:error] : [self runPhotoWithError:error];
+    if ([self.operation isEqualToString:@"audio"])
+        return self.stream ? [self runAudioStreamWithError:error] : [self runAudioWithError:error];
+    if ([self.operation isEqualToString:@"video"])
+        return self.stream ? [self runVideoStreamWithError:error] : [self runVideoWithError:error];
+    if ([self.operation isEqualToString:@"screen-record"])
+        return self.stream ? [self runScreenRecordStreamWithError:error] : [self runScreenRecordWithError:error];
+    if ([self.operation isEqualToString:@"barcode"])
+        return self.stream ? [self runBarcodeStreamWithError:error] : [self runBarcodeWithError:error];
     if ([self.operation isEqualToString:@"list-devices"]) return [self runListDevicesWithError:error];
     return YES;
 }
@@ -431,19 +504,11 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
             CPumpAppKit();
             [NSThread sleepForTimeInterval:0.02];
         }
-        fprintf(stderr, "Press ENTER to capture photo from '%s'...\n", device.localizedName.UTF8String);
-        __block volatile BOOL enterPressed = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin);
-            enterPressed = YES;
-        });
-        CSpinAppKitUntilFlag(&enterPressed);
     } else {
-        // Headless: block on sleep + fgets; run loop not needed
+        // Headless: wait for camera to stabilise
         [NSThread sleepForTimeInterval:1.5];
-        fprintf(stderr, "Press ENTER to capture photo from '%s'...\n", device.localizedName.UTF8String);
-        char lb[256]; fgets(lb, sizeof(lb), stdin);
     }
+    fprintf(stderr, "Capturing photo from '%s'...\n", device.localizedName.UTF8String);
 
     delegate.shouldCapture = YES;
     dispatch_semaphore_wait(capSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
@@ -493,47 +558,48 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
 
     NSString *autoName = [NSString stringWithFormat:@"audio_%ld.m4a", (long)[[NSDate date] timeIntervalSince1970]];
     NSURL *mediaURL = [self resolveMediaURLWithName:autoName];
+
+    // Validate the output extension — macOS has no mp3 encoder
+    NSString *ext = mediaURL.pathExtension.lowercaseString;
+    if ([ext isEqualToString:@"mp3"]) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:1
+            userInfo:@{NSLocalizedDescriptionKey:
+                @"mp3 encoding is not supported on macOS — use .m4a (AAC) or .wav instead"}];
+        return NO;
+    }
+
     [[NSFileManager defaultManager] createDirectoryAtURL:mediaURL.URLByDeletingLastPathComponent
                              withIntermediateDirectories:YES attributes:nil error:nil];
 
-    NSDictionary *settings = @{
-        AVFormatIDKey:         @(kAudioFormatMPEG4AAC),
-        AVSampleRateKey:       @44100.0,
-        AVNumberOfChannelsKey: @1,
-        AVEncoderBitRateKey:   @128000,
-    };
+    BOOL isWav = [ext isEqualToString:@"wav"] || [ext isEqualToString:@"aiff"] || [ext isEqualToString:@"aif"];
+    NSDictionary *settings = isWav
+        ? @{
+            AVFormatIDKey:         @(kAudioFormatLinearPCM),
+            AVSampleRateKey:       @44100.0,
+            AVNumberOfChannelsKey: @1,
+            AVLinearPCMBitDepthKey: @16,
+            AVLinearPCMIsFloatKey:  @NO,
+          }
+        : @{
+            AVFormatIDKey:         @(kAudioFormatMPEG4AAC),
+            AVSampleRateKey:       @44100.0,
+            AVNumberOfChannelsKey: @1,
+            AVEncoderBitRateKey:   @128000,
+          };
     AVAudioRecorder *recorder = [[AVAudioRecorder alloc] initWithURL:mediaURL settings:settings error:error];
     if (!recorder) return NO;
 
     gStopCapture = 0;
     signal(SIGINT, captureSignalHandler);
 
+    [recorder record];
     if (self.duration > 0) {
-        // Headless: start immediately, auto-stop after duration (ENTER or Ctrl+C stop early)
-        [recorder record];
-        fprintf(stderr, "Recording audio for %.0f seconds... (ENTER or Ctrl+C to stop early)\n", self.duration);
-        __block volatile BOOL enter = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin); enter = YES;
-        });
-        CSpinUntilFlagOrStop(&enter, self.duration);
+        fprintf(stderr, "Recording audio for %.0f seconds... (Ctrl+C to stop early)\n", self.duration);
+        volatile BOOL never = NO;
+        CSpinUntilFlagOrStop(&never, self.duration);
     } else {
-        // Interactive: ENTER to start, ENTER to stop
-        fprintf(stderr, "Press ENTER to start recording...\n");
-        __block volatile BOOL enter1 = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin); enter1 = YES;
-        });
-        CSpinUntilFlagOrStop(&enter1, 0);
-        if (!gStopCapture) {
-            [recorder record];
-            fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-            __block volatile BOOL enter2 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter2 = YES;
-            });
-            CSpinUntilFlagOrStop(&enter2, 0);
-        }
+        fprintf(stderr, "Recording audio... (Ctrl+C to stop)\n");
+        while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
     }
 
     NSTimeInterval recDuration = recorder.currentTime;
@@ -595,65 +661,38 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
         previewWindow = [self createPreviewWindowForSession:session
             title:[NSString stringWithFormat:@"Preview — %@", device.localizedName]];
         [session startRunning];
-
-        fprintf(stderr, "Press ENTER to start recording from '%s'...\n", device.localizedName.UTF8String);
-        __block volatile BOOL enter1 = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin);
-            enter1 = YES;
-        });
-        CSpinAppKitUntilFlag(&enter1);
-
-        if (!gStopCapture) {
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-            __block volatile BOOL enter2 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin);
-                enter2 = YES;
-            });
-            CSpinAppKitUntilFlagOrStop(&enter2, self.duration);
-            [movieOutput stopRecording];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
+        if (self.duration > 0) {
+            fprintf(stderr, "Recording video for %.0f seconds from '%s'... (Ctrl+C to stop early)\n",
+                    self.duration, device.localizedName.UTF8String);
+        } else {
+            fprintf(stderr, "Recording from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
         }
+        volatile BOOL never = NO;
+        CSpinAppKitUntilFlagOrStop(&never, self.duration);
+        [movieOutput stopRecording];
     } else {
         [session startRunning];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
         if (self.duration > 0) {
-            // Headless: start immediately, auto-stop after duration
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording video for %.0f seconds from '%s'... (ENTER or Ctrl+C to stop early)\n",
+            fprintf(stderr, "Recording video for %.0f seconds from '%s'... (Ctrl+C to stop early)\n",
                     self.duration, device.localizedName.UTF8String);
-            __block volatile BOOL enter = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter = YES;
-            });
-            CSpinUntilFlagOrStop(&enter, self.duration);
+            volatile BOOL never = NO;
+            CSpinUntilFlagOrStop(&never, self.duration);
         } else {
-            // Interactive: ENTER to start, ENTER to stop
-            fprintf(stderr, "Press ENTER to start recording from '%s'...\n", device.localizedName.UTF8String);
-            __block volatile BOOL enter1 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter1 = YES;
-            });
-            CSpinUntilFlagOrStop(&enter1, 0);
-            if (!gStopCapture) {
-                [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-                fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-                __block volatile BOOL enter2 = NO;
-                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                    char buf[256]; fgets(buf, sizeof(buf), stdin); enter2 = YES;
-                });
-                CSpinUntilFlagOrStop(&enter2, 0);
-            }
+            fprintf(stderr, "Recording from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
+            while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
         }
         [movieOutput stopRecording];
     }
+
+    // Wait for AVCaptureMovieFileOutput to finalize the file; keep SIGINT
+    // handling active so a second Ctrl+C is caught rather than killing the
+    // process while the file is being written.
+    dispatch_semaphore_wait(delegate.doneSem,
+        dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
     signal(SIGINT, SIG_DFL);
 
-    // Wait for file to be finalized
-    NSDate *finDeadline = [NSDate dateWithTimeIntervalSinceNow:10.0];
-    while (!delegate.finished && [[NSDate date] compare:finDeadline] == NSOrderedAscending) {
-        [NSThread sleepForTimeInterval:0.05];
-    }
     [session stopRunning];
     [previewWindow close];
 
@@ -728,63 +767,35 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
         previewWindow = [self createPreviewWindowForSession:session
             title:[NSString stringWithFormat:@"Preview — Display %ld", (long)self.displayIndex]];
         [session startRunning];
-
-        fprintf(stderr, "Press ENTER to start recording display %ld...\n", (long)self.displayIndex);
-        __block volatile BOOL enter1 = NO;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            char buf[256]; fgets(buf, sizeof(buf), stdin);
-            enter1 = YES;
-        });
-        CSpinAppKitUntilFlag(&enter1);
-
-        if (!gStopCapture) {
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-            __block volatile BOOL enter2 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin);
-                enter2 = YES;
-            });
-            CSpinAppKitUntilFlag(&enter2);
-            [movieOutput stopRecording];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
+        if (self.duration > 0) {
+            fprintf(stderr, "Recording display %ld for %.0f seconds... (Ctrl+C to stop early)\n",
+                    (long)self.displayIndex, self.duration);
+        } else {
+            fprintf(stderr, "Recording display %ld... (Ctrl+C to stop)\n", (long)self.displayIndex);
         }
+        volatile BOOL never = NO;
+        CSpinAppKitUntilFlagOrStop(&never, self.duration);
+        [movieOutput stopRecording];
     } else {
         [session startRunning];
+        [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
         if (self.duration > 0) {
-            // Headless: start immediately, auto-stop after duration
-            [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-            fprintf(stderr, "Recording screen for %.0f seconds... (ENTER or Ctrl+C to stop early)\n", self.duration);
-            __block volatile BOOL enter = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter = YES;
-            });
-            CSpinUntilFlagOrStop(&enter, self.duration);
+            fprintf(stderr, "Recording display %ld for %.0f seconds... (Ctrl+C to stop early)\n",
+                    (long)self.displayIndex, self.duration);
+            volatile BOOL never = NO;
+            CSpinUntilFlagOrStop(&never, self.duration);
         } else {
-            // Interactive: ENTER to start, ENTER to stop
-            fprintf(stderr, "Press ENTER to start recording display %ld...\n", (long)self.displayIndex);
-            __block volatile BOOL enter1 = NO;
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                char buf[256]; fgets(buf, sizeof(buf), stdin); enter1 = YES;
-            });
-            CSpinUntilFlagOrStop(&enter1, 0);
-            if (!gStopCapture) {
-                [movieOutput startRecordingToOutputFileURL:tmpURL recordingDelegate:delegate];
-                fprintf(stderr, "Recording... press ENTER to stop (or Ctrl+C)\n");
-                __block volatile BOOL enter2 = NO;
-                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                    char buf[256]; fgets(buf, sizeof(buf), stdin); enter2 = YES;
-                });
-                CSpinUntilFlagOrStop(&enter2, 0);
-            }
+            fprintf(stderr, "Recording display %ld... (Ctrl+C to stop)\n", (long)self.displayIndex);
+            while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
         }
         [movieOutput stopRecording];
     }
+
+    dispatch_semaphore_wait(delegate.doneSem,
+        dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
     signal(SIGINT, SIG_DFL);
 
-    NSDate *finDeadline = [NSDate dateWithTimeIntervalSinceNow:10.0];
-    while (!delegate.finished && [[NSDate date] compare:finDeadline] == NSOrderedAscending) {
-        [NSThread sleepForTimeInterval:0.05];
-    }
     [session stopRunning];
     [previewWindow close];
 
@@ -804,6 +815,413 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
                                       @"duration_s": @(round(recDuration * 100.0) / 100.0)} mutableCopy];
     if (self.debug) result[@"processing_ms"] = @((NSInteger)(-[start timeIntervalSinceNow] * 1000.0));
     return [self saveResult:result mediaURL:mediaURL error:error];
+}
+
+// ── video --stream ────────────────────────────────────────────────────────────
+
+- (BOOL)runVideoStreamWithError:(NSError **)error {
+    // Request camera TCC permission
+    dispatch_semaphore_t permSem = dispatch_semaphore_create(0);
+    __block BOOL permGranted = NO;
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+        permGranted = granted;
+        dispatch_semaphore_signal(permSem);
+    }];
+    dispatch_semaphore_wait(permSem, DISPATCH_TIME_FOREVER);
+    if (!permGranted) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:80
+            userInfo:@{NSLocalizedDescriptionKey:
+                @"Camera access denied — grant permission in System Settings > Privacy & Security > Camera"}];
+        return NO;
+    }
+
+    AVCaptureDevice *device = CAVVideoDevice(self.deviceIndex);
+    if (!device) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:80
+            userInfo:@{NSLocalizedDescriptionKey: @"No camera available"}];
+        return NO;
+    }
+    AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:device error:error];
+    if (!input) return NO;
+
+    AVCaptureSession *session = [[AVCaptureSession alloc] init];
+    session.sessionPreset = AVCaptureSessionPresetMedium;
+    [session addInput:input];
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    CaptureStreamDelegate *streamDelegate = [[CaptureStreamDelegate alloc] init];
+    streamDelegate.writer        = writer;
+    streamDelegate.ciContext     = [CIContext context];
+    streamDelegate.jpegQuality   = self.jpegQuality > 0.0 ? self.jpegQuality : 0.85;
+    streamDelegate.frameInterval = self.fps > 0 ? (1.0 / (double)self.fps) : 0.0;
+
+    AVCaptureVideoDataOutput *videoOutput = [[AVCaptureVideoDataOutput alloc] init];
+    videoOutput.alwaysDiscardsLateVideoFrames = YES;
+    dispatch_queue_t captureQ = dispatch_queue_create("mv.capture.videostream", DISPATCH_QUEUE_SERIAL);
+    [videoOutput setSampleBufferDelegate:streamDelegate queue:captureQ];
+    [session addOutput:videoOutput];
+
+    gStopCapture = 0;
+    signal(SIGINT, captureSignalHandler);
+
+    [session startRunning];
+    fprintf(stderr, "Streaming from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
+
+    while (!gStopCapture) {
+        [NSThread sleepForTimeInterval:0.05];
+    }
+
+    [session stopRunning];
+    signal(SIGINT, SIG_DFL);
+    return YES;
+}
+
+// ── screenshot --stream ───────────────────────────────────────────────────────
+
+- (BOOL)runScreenshotStreamWithError:(NSError **)error {
+    CGDirectDisplayID displayID = CGMainDisplayID();
+    if (self.displayIndex > 0) {
+        uint32_t count = 0;
+        CGGetActiveDisplayList(0, NULL, &count);
+        if ((NSInteger)count <= self.displayIndex) {
+            if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:71
+                userInfo:@{NSLocalizedDescriptionKey:
+                    [NSString stringWithFormat:@"Display index %ld not found (%u active display(s))",
+                     (long)self.displayIndex, count]}];
+            return NO;
+        }
+        CGDirectDisplayID displays[32];
+        CGGetActiveDisplayList(32, displays, &count);
+        displayID = displays[self.displayIndex];
+    }
+
+    CGImageRef cgi = CGDisplayCreateImage(displayID);
+    if (!cgi) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:70
+            userInfo:@{NSLocalizedDescriptionKey: @"Failed to capture display image"}];
+        return NO;
+    }
+
+    CIContext *ctx = [CIContext context];
+    CIImage *ciImage = [[CIImage alloc] initWithCGImage:cgi];
+    CGImageRelease(cgi);
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    double quality = self.jpegQuality > 0.0 ? self.jpegQuality : 0.85;
+    NSData *jpeg = [ctx JPEGRepresentationOfImage:ciImage
+                                       colorSpace:cs
+                                          options:@{(id)kCGImageDestinationLossyCompressionQuality: @(quality)}];
+    CGColorSpaceRelease(cs);
+    if (!jpeg) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:70
+            userInfo:@{NSLocalizedDescriptionKey: @"Failed to encode screenshot as JPEG"}];
+        return NO;
+    }
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    [writer writeFrame:jpeg extraHeaders:nil];
+    return YES;
+}
+
+// ── photo --stream ────────────────────────────────────────────────────────────
+
+- (BOOL)runPhotoStreamWithError:(NSError **)error {
+    // Request camera TCC permission
+    dispatch_semaphore_t permSem = dispatch_semaphore_create(0);
+    __block BOOL permGranted = NO;
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+        permGranted = granted;
+        dispatch_semaphore_signal(permSem);
+    }];
+    dispatch_semaphore_wait(permSem, DISPATCH_TIME_FOREVER);
+    if (!permGranted) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:80
+            userInfo:@{NSLocalizedDescriptionKey:
+                @"Camera access denied — grant permission in System Settings > Privacy & Security > Camera"}];
+        return NO;
+    }
+
+    AVCaptureDevice *device = CAVVideoDevice(self.deviceIndex);
+    if (!device) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:80
+            userInfo:@{NSLocalizedDescriptionKey: @"No camera available"}];
+        return NO;
+    }
+    AVCaptureDeviceInput *input = [AVCaptureDeviceInput deviceInputWithDevice:device error:error];
+    if (!input) return NO;
+
+    AVCaptureSession *session = [[AVCaptureSession alloc] init];
+    session.sessionPreset = AVCaptureSessionPresetPhoto;
+    [session addInput:input];
+
+    dispatch_semaphore_t capSem = dispatch_semaphore_create(0);
+    CaptureFrameDelegate *delegate = [[CaptureFrameDelegate alloc] initWithSemaphore:capSem];
+    delegate.shouldCapture = NO;
+
+    AVCaptureVideoDataOutput *videoOutput = [[AVCaptureVideoDataOutput alloc] init];
+    videoOutput.alwaysDiscardsLateVideoFrames = YES;
+    dispatch_queue_t captureQ = dispatch_queue_create("mv.capture.photostream", DISPATCH_QUEUE_SERIAL);
+    [videoOutput setSampleBufferDelegate:delegate queue:captureQ];
+    [session addOutput:videoOutput];
+
+    [session startRunning];
+    // Warm up camera: wait for it to stabilise before capturing
+    [NSThread sleepForTimeInterval:1.5];
+    delegate.shouldCapture = YES;
+    dispatch_semaphore_wait(capSem, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC));
+    [session stopRunning];
+
+    if (!delegate.capturedImage) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:81
+            userInfo:@{NSLocalizedDescriptionKey: @"Failed to capture photo frame"}];
+        return NO;
+    }
+
+    CIContext *ctx = [CIContext context];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    double quality = self.jpegQuality > 0.0 ? self.jpegQuality : 0.85;
+    NSData *jpeg = [ctx JPEGRepresentationOfImage:delegate.capturedImage
+                                       colorSpace:cs
+                                          options:@{(id)kCGImageDestinationLossyCompressionQuality: @(quality)}];
+    CGColorSpaceRelease(cs);
+    if (!jpeg) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:82
+            userInfo:@{NSLocalizedDescriptionKey: @"Failed to encode photo as JPEG"}];
+        return NO;
+    }
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    [writer writeFrame:jpeg extraHeaders:nil];
+    return YES;
+}
+
+// ── audio --stream ────────────────────────────────────────────────────────────
+
+- (BOOL)runAudioStreamWithError:(NSError **)error {
+    // Build MVAU format from processor properties
+    MVAudioFormat fmt;
+    fmt.sampleRate = self.audioSampleRate > 0 ? self.audioSampleRate : 16000;
+    fmt.channels   = self.audioChannels   > 0 ? self.audioChannels   : 1;
+    fmt.bitDepth   = self.audioBitDepth   > 0 ? self.audioBitDepth   : 16;
+
+    MVAudioWriter *audioWriter = [[MVAudioWriter alloc] initWithFileDescriptor:STDOUT_FILENO format:fmt];
+
+    // Set up AVAudioEngine to capture from the default microphone
+    AVAudioEngine *engine = [[AVAudioEngine alloc] init];
+    AVAudioInputNode *inputNode = engine.inputNode;
+    AVAudioFormat *inputFormat = [inputNode inputFormatForBus:0];
+
+    // Request the hardware's native format; resample to target format via AVAudioConverter
+    AVAudioFormat *targetFmt = [[AVAudioFormat alloc]
+        initWithCommonFormat:AVAudioPCMFormatInt16
+                  sampleRate:(double)fmt.sampleRate
+                    channels:(AVAudioChannelCount)fmt.channels
+                 interleaved:YES];
+
+    AVAudioConverter *converter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:targetFmt];
+
+    [audioWriter writeHeader];
+
+    NSError *engineErr = nil;
+    [inputNode installTapOnBus:0 bufferSize:4096 format:inputFormat block:^(AVAudioPCMBuffer *buf, AVAudioTime *when) {
+        // Convert to target format
+        AVAudioFrameCount capacity = (AVAudioFrameCount)((double)buf.frameLength * fmt.sampleRate / inputFormat.sampleRate + 1);
+        AVAudioPCMBuffer *outBuf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFmt frameCapacity:capacity];
+        if (!outBuf) return;
+
+        __block BOOL inputConsumed = NO;
+        AVAudioConverterOutputStatus status = [converter convertToBuffer:outBuf error:nil
+            withInputFromBlock:^AVAudioBuffer *(AVAudioPacketCount inNumPackets, AVAudioConverterInputStatus *outStatus) {
+                if (inputConsumed) {
+                    *outStatus = AVAudioConverterInputStatus_NoDataNow;
+                    return nil;
+                }
+                inputConsumed = YES;
+                *outStatus = AVAudioConverterInputStatus_HaveData;
+                return buf;
+            }];
+
+        if ((status == AVAudioConverterOutputStatus_HaveData || status == AVAudioConverterOutputStatus_InputRanDry)
+             && outBuf.frameLength > 0) {
+            NSUInteger bytes = outBuf.frameLength * fmt.channels * (fmt.bitDepth / 8);
+            NSData *pcmData = [NSData dataWithBytes:outBuf.int16ChannelData[0] length:bytes];
+            [audioWriter writeSamples:pcmData];
+        }
+    }];
+
+    if (![engine startAndReturnError:&engineErr]) {
+        if (error) *error = engineErr;
+        return NO;
+    }
+
+    gStopCapture = 0;
+    signal(SIGINT, captureSignalHandler);
+    fprintf(stderr, "Streaming audio (MVAU) to stdout... (Ctrl+C to stop)\n");
+
+    if (self.duration > 0) {
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:self.duration];
+        while (!gStopCapture && [[NSDate date] compare:deadline] == NSOrderedAscending) {
+            [NSThread sleepForTimeInterval:0.05];
+        }
+    } else {
+        while (!gStopCapture) {
+            [NSThread sleepForTimeInterval:0.05];
+        }
+    }
+
+    [engine stop];
+    [inputNode removeTapOnBus:0];
+    signal(SIGINT, SIG_DFL);
+    return YES;
+}
+
+// ── screen-record --stream ────────────────────────────────────────────────────
+
+- (BOOL)runScreenRecordStreamWithError:(NSError **)error {
+    CGDirectDisplayID displayID = CGMainDisplayID();
+    if (self.displayIndex > 0) {
+        uint32_t count = 0;
+        CGGetActiveDisplayList(0, NULL, &count);
+        if ((NSInteger)count <= self.displayIndex) {
+            if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:71
+                userInfo:@{NSLocalizedDescriptionKey:
+                    [NSString stringWithFormat:@"Display index %ld not found (%u active display(s))",
+                     (long)self.displayIndex, count]}];
+            return NO;
+        }
+        CGDirectDisplayID displays[32];
+        CGGetActiveDisplayList(32, displays, &count);
+        displayID = displays[self.displayIndex];
+    }
+
+    AVCaptureSession *session = [[AVCaptureSession alloc] init];
+    AVCaptureScreenInput *screenInput = [[AVCaptureScreenInput alloc] initWithDisplayID:displayID];
+    if (self.fps > 0) screenInput.minFrameDuration = CMTimeMake(1, (int32_t)self.fps);
+    if (![session canAddInput:screenInput]) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:84
+            userInfo:@{NSLocalizedDescriptionKey: @"Cannot add screen input — check Screen Recording permission in System Settings"}];
+        return NO;
+    }
+    [session addInput:screenInput];
+
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+    CaptureStreamDelegate *streamDelegate = [[CaptureStreamDelegate alloc] init];
+    streamDelegate.writer        = writer;
+    streamDelegate.ciContext     = [CIContext context];
+    streamDelegate.jpegQuality   = self.jpegQuality > 0.0 ? self.jpegQuality : 0.85;
+    // fps throttle already handled by screenInput.minFrameDuration; no extra throttle needed
+    streamDelegate.frameInterval = 0.0;
+
+    AVCaptureVideoDataOutput *videoOutput = [[AVCaptureVideoDataOutput alloc] init];
+    videoOutput.alwaysDiscardsLateVideoFrames = YES;
+    dispatch_queue_t captureQ = dispatch_queue_create("mv.capture.screenstream", DISPATCH_QUEUE_SERIAL);
+    [videoOutput setSampleBufferDelegate:streamDelegate queue:captureQ];
+    if (![session canAddOutput:videoOutput]) {
+        if (error) *error = [NSError errorWithDomain:CaptureErrorDomain code:84
+            userInfo:@{NSLocalizedDescriptionKey: @"Cannot add video output to screen record session"}];
+        return NO;
+    }
+    [session addOutput:videoOutput];
+
+    gStopCapture = 0;
+    signal(SIGINT, captureSignalHandler);
+
+    [session startRunning];
+    fprintf(stderr, "Streaming screen %ld as MJPEG to stdout... (Ctrl+C to stop)\n", (long)self.displayIndex);
+
+    if (self.duration > 0) {
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:self.duration];
+        while (!gStopCapture && [[NSDate date] compare:deadline] == NSOrderedAscending) {
+            [NSThread sleepForTimeInterval:0.05];
+        }
+    } else {
+        while (!gStopCapture) {
+            [NSThread sleepForTimeInterval:0.05];
+        }
+    }
+
+    [session stopRunning];
+    signal(SIGINT, SIG_DFL);
+    return YES;
+}
+
+// ── barcode stream filter (MJPEG in → MJPEG out + X-MV-streamcapture-barcode) ─
+
+- (BOOL)runBarcodeStreamWithError:(NSError **)error {
+    // Build Vision barcode symbol type filter from --types
+    NSArray<NSString *> *symbologyFilter = nil;
+    if (self.types.length) {
+        NSMutableArray *syms = [NSMutableArray array];
+        // Map VN symbol type names from user-friendly names via the AV map,
+        // then convert to VNBarcodeSymbology equivalents.
+        NSDictionary<NSString *, NSString *> *vnMap = @{
+            @"qr":         VNBarcodeSymbologyQR,
+            @"ean13":      VNBarcodeSymbologyEAN13,
+            @"ean8":       VNBarcodeSymbologyEAN8,
+            @"upce":       VNBarcodeSymbologyUPCE,
+            @"code128":    VNBarcodeSymbologyCode128,
+            @"code39":     VNBarcodeSymbologyCode39,
+            @"code93":     VNBarcodeSymbologyCode93,
+            @"pdf417":     VNBarcodeSymbologyPDF417,
+            @"aztec":      VNBarcodeSymbologyAztec,
+            @"datamatrix": VNBarcodeSymbologyDataMatrix,
+            @"itf14":      VNBarcodeSymbologyITF14,
+            @"i2of5":      VNBarcodeSymbologyI2of5,
+        };
+        for (NSString *name in [self.types componentsSeparatedByString:@","]) {
+            NSString *t = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].lowercaseString;
+            NSString *sym = vnMap[t];
+            if (sym) [syms addObject:sym];
+            else fprintf(stderr, "streamcapture: unknown barcode type '%s'\n", t.UTF8String);
+        }
+        symbologyFilter = [syms copy];
+    }
+
+    MVMjpegReader *reader = [[MVMjpegReader alloc] initWithFileDescriptor:STDIN_FILENO];
+    MVMjpegWriter *writer = [[MVMjpegWriter alloc] initWithFileDescriptor:STDOUT_FILENO];
+
+    [reader readFramesWithHandler:^(NSData *jpeg, NSDictionary<NSString *, NSString *> *inHeaders) {
+        NSMutableDictionary<NSString *, NSString *> *outHeaders = [NSMutableDictionary dictionaryWithDictionary:inHeaders];
+        [outHeaders removeObjectForKey:@"Content-Type"];
+        [outHeaders removeObjectForKey:@"Content-Length"];
+
+        // Decode JPEG → CGImage for Vision
+        CGImageSourceRef src = CGImageSourceCreateWithData((__bridge CFDataRef)jpeg, nil);
+        CGImageRef cg = src ? CGImageSourceCreateImageAtIndex(src, 0, nil) : NULL;
+        if (src) CFRelease(src);
+
+        if (cg) {
+            VNDetectBarcodesRequest *req = [[VNDetectBarcodesRequest alloc] init];
+            if (symbologyFilter.count) req.symbologies = symbologyFilter;
+            VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+            CGImageRelease(cg);
+            NSError *vnErr = nil;
+            if ([handler performRequests:@[req] error:&vnErr] && req.results.count) {
+                NSMutableArray *barcodes = [NSMutableArray array];
+                for (VNBarcodeObservation *obs in req.results) {
+                    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+                    entry[@"type"]    = obs.symbology ?: @"unknown";
+                    if (obs.payloadStringValue) entry[@"payload"] = obs.payloadStringValue;
+                    CGRect b = obs.boundingBox;
+                    entry[@"bounds"] = @{
+                        @"x": @(b.origin.x), @"y": @(1.0 - b.origin.y - b.size.height),
+                        @"width": @(b.size.width), @"height": @(b.size.height),
+                    };
+                    [barcodes addObject:entry];
+                }
+                NSDictionary *result = @{ @"operation": @"barcode", @"barcodes": barcodes };
+                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+                if (jsonData)
+                    outHeaders[@"X-MV-streamcapture-barcode"] =
+                        [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+            }
+        } else {
+            // No CGImage — still pass frame through without header
+        }
+
+        [writer writeFrame:jpeg extraHeaders:outHeaders];
+    }];
+
+    return YES;
 }
 
 // ── barcode ───────────────────────────────────────────────────────────────────
@@ -857,13 +1275,15 @@ static void CSpinAppKitUntilFlag(volatile BOOL *flag) {
 
     gStopCapture = 0;
     signal(SIGINT, captureSignalHandler);
-    fprintf(stderr, "Scanning for barcodes from '%s'... (press ENTER or Ctrl+C to stop)\n", device.localizedName.UTF8String);
-
-    __block volatile BOOL enterPressed = NO;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        char buf[256]; fgets(buf, sizeof(buf), stdin); enterPressed = YES;
-    });
-    CSpinUntilFlagOrStop(&enterPressed, self.duration);
+    if (self.duration > 0) {
+        fprintf(stderr, "Scanning for barcodes from '%s' for %.0f seconds... (Ctrl+C to stop early)\n",
+                device.localizedName.UTF8String, self.duration);
+        volatile BOOL never = NO;
+        CSpinUntilFlagOrStop(&never, self.duration);
+    } else {
+        fprintf(stderr, "Scanning for barcodes from '%s'... (Ctrl+C to stop)\n", device.localizedName.UTF8String);
+        while (!gStopCapture) { [NSThread sleepForTimeInterval:0.05]; }
+    }
 
     [session stopRunning];
     signal(SIGINT, SIG_DFL);

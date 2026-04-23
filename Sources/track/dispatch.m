@@ -1,4 +1,5 @@
 #import "track/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -43,8 +44,11 @@ BOOL MVDispatchTrack(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--output"] && i+1 < (NSInteger)args.count)           { output       = args[++i]; }
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)      { jsonOutput   = args[++i]; }
         else if ([a isEqualToString:@"--artifacts-dir"] && i+1 < (NSInteger)args.count)    { artifactsDir = args[++i]; }
+        else if ([a isEqualToString:@"--no-stream"]) { /* accepted; track always operates in file mode */ }
+        else if ([a isEqualToString:@"--stream"]) {
+            fprintf(stderr, "warning: track does not support stream mode; flag ignored\n");
+        }
         else {
-            fprintf(stderr, "track: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"track: unknown option '%@'", a]}];

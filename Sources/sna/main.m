@@ -1,6 +1,8 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVAudioStream.h"
 #import <SoundAnalysis/SoundAnalysis.h>
+#import <AVFoundation/AVFoundation.h>
 #import <CoreML/CoreML.h>
 #import <CoreMedia/CoreMedia.h>
 
@@ -58,8 +60,11 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
 
 - (instancetype)init {
     if (self = [super init]) {
-        _operation = @"classify";
-        _topk      = 5;
+        _operation  = @"classify";
+        _topk       = 5;
+        _sampleRate = 16000;
+        _channels   = 1;
+        _bitDepth   = 16;
     }
     return self;
 }
@@ -84,6 +89,9 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
         NSDictionary *envelope = MVMakeEnvelope(@"sna", self.operation, @"", result);
         return MVEmitEnvelope(envelope, self.jsonOutput, error);
     }
+
+    // Stream-in mode: read audio from stdin
+    if (self.streamIn) return [self runAudioStreamWithError:error];
 
     if (!self.inputPath.length) {
         if (error) {
@@ -329,6 +337,64 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
         }
         return nil;
     }
+}
+
+// ── MVAU stream-in mode ───────────────────────────────────────────────────────
+
+- (BOOL)runAudioStreamWithError:(NSError **)error {
+    MVAudioFormat fallback;
+    fallback.sampleRate = self.sampleRate > 0 ? self.sampleRate : 16000;
+    fallback.channels   = self.channels   > 0 ? self.channels   : 1;
+    fallback.bitDepth   = self.bitDepth   > 0 ? self.bitDepth   : 16;
+
+    MVAudioReader *reader = [[MVAudioReader alloc] initWithFileDescriptor:STDIN_FILENO
+                                                            fallbackFormat:fallback];
+    NSError *readErr = nil;
+    NSData *pcmData = [reader readAllData:&readErr];
+    if (!pcmData || pcmData.length == 0) {
+        if (error) *error = readErr ?: [NSError errorWithDomain:SNAErrorDomain code:60
+                                          userInfo:@{NSLocalizedDescriptionKey: @"No audio data received from stdin"}];
+        return NO;
+    }
+
+    MVAudioFormat fmt = reader.format;
+
+    // Write PCM to a temp WAV file for SoundAnalysis
+    NSString *tmpName = [[NSUUID UUID].UUIDString stringByAppendingPathExtension:@"wav"];
+    NSURL *tmpWav = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:tmpName]];
+
+    NSDictionary *wavSettings = @{
+        AVFormatIDKey:             @(kAudioFormatLinearPCM),
+        AVSampleRateKey:           @(fmt.sampleRate),
+        AVNumberOfChannelsKey:     @(fmt.channels),
+        AVLinearPCMBitDepthKey:    @(fmt.bitDepth),
+        AVLinearPCMIsFloatKey:     @NO,
+        AVLinearPCMIsBigEndianKey: @NO,
+    };
+    NSError *wavErr = nil;
+    AVAudioFile *wavFile = [[AVAudioFile alloc] initForWriting:tmpWav settings:wavSettings error:&wavErr];
+    if (!wavFile) { if (error) *error = wavErr; return NO; }
+
+    AVAudioFormat *avFmt = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
+                                                            sampleRate:(double)fmt.sampleRate
+                                                              channels:(AVAudioChannelCount)fmt.channels
+                                                           interleaved:YES];
+    AVAudioFrameCount frameCount = (AVAudioFrameCount)(pcmData.length / (fmt.channels * (fmt.bitDepth / 8)));
+    AVAudioPCMBuffer *pcmBuf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:avFmt frameCapacity:frameCount];
+    pcmBuf.frameLength = frameCount;
+    memcpy(pcmBuf.int16ChannelData[0], pcmData.bytes, pcmData.length);
+
+    if (![wavFile writeFromBuffer:pcmBuf error:error]) {
+        [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+        return NO;
+    }
+    wavFile = nil;
+
+    // Now run the regular classify operation on the temp file
+    self.inputPath = tmpWav.path;
+    BOOL ok = [self runWithError:error];
+    [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+    return ok;
 }
 
 @end

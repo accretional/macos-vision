@@ -18,6 +18,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *modelPath;
 @property (nonatomic, copy, nullable) NSString *jsonOutput;
 @property (nonatomic, assign) BOOL debug;
+@property (nonatomic, assign) BOOL stream;
+@property (nonatomic, assign) BOOL streamOut;
+@property (nonatomic, copy, nullable) NSString *ndjsonOutput;
 
 - (BOOL)runWithError:(NSError **)error;
 

@@ -1,5 +1,6 @@
 #import "main.h"
 #import "common/MVJsonEmit.h"
+#import "common/MVAudioStream.h"
 #import <ShazamKit/ShazamKit.h>
 #import <AVFoundation/AVFoundation.h>
 
@@ -53,12 +54,18 @@ API_AVAILABLE(macos(12.0))
 
 - (instancetype)init {
     if (self = [super init]) {
-        _operation = @"match";
+        _operation  = @"match";
+        _sampleRate = 16000;
+        _channels   = 1;
+        _bitDepth   = 16;
     }
     return self;
 }
 
 - (BOOL)runWithError:(NSError **)error {
+    // Stream-in mode: read audio from stdin
+    if (self.streamIn) return [self runAudioStreamWithError:error];
+
     NSArray *validOps = @[@"match", @"match-custom", @"build"];
     if (![validOps containsObject:self.operation]) {
         if (error) {
@@ -294,6 +301,65 @@ API_AVAILABLE(macos(12.0))
     return [filtered sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
         return [a.path compare:b.path];
     }];
+}
+
+// ── MVAU stream-in mode ───────────────────────────────────────────────────────
+
+- (BOOL)runAudioStreamWithError:(NSError **)error {
+    MVAudioFormat fallback;
+    fallback.sampleRate = self.sampleRate > 0 ? self.sampleRate : 16000;
+    fallback.channels   = self.channels   > 0 ? self.channels   : 1;
+    fallback.bitDepth   = self.bitDepth   > 0 ? self.bitDepth   : 16;
+
+    MVAudioReader *reader = [[MVAudioReader alloc] initWithFileDescriptor:STDIN_FILENO
+                                                            fallbackFormat:fallback];
+    NSError *readErr = nil;
+    NSData *pcmData = [reader readAllData:&readErr];
+    if (!pcmData || pcmData.length == 0) {
+        if (error) *error = readErr ?: [NSError errorWithDomain:ShazamErrorDomain code:70
+                                          userInfo:@{NSLocalizedDescriptionKey: @"No audio data received from stdin"}];
+        return NO;
+    }
+
+    MVAudioFormat fmt = reader.format;
+
+    // Write PCM to a temp WAV file for Shazam matching
+    NSString *tmpName = [[NSUUID UUID].UUIDString stringByAppendingPathExtension:@"wav"];
+    NSURL *tmpWav = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:tmpName]];
+
+    NSDictionary *wavSettings = @{
+        AVFormatIDKey:             @(kAudioFormatLinearPCM),
+        AVSampleRateKey:           @(fmt.sampleRate),
+        AVNumberOfChannelsKey:     @(fmt.channels),
+        AVLinearPCMBitDepthKey:    @(fmt.bitDepth),
+        AVLinearPCMIsFloatKey:     @NO,
+        AVLinearPCMIsBigEndianKey: @NO,
+    };
+    NSError *wavErr = nil;
+    AVAudioFile *wavFile = [[AVAudioFile alloc] initForWriting:tmpWav settings:wavSettings error:&wavErr];
+    if (!wavFile) { if (error) *error = wavErr; return NO; }
+
+    AVAudioFormat *avFmt = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
+                                                            sampleRate:(double)fmt.sampleRate
+                                                              channels:(AVAudioChannelCount)fmt.channels
+                                                           interleaved:YES];
+    AVAudioFrameCount frameCount = (AVAudioFrameCount)(pcmData.length / (fmt.channels * (fmt.bitDepth / 8)));
+    AVAudioPCMBuffer *pcmBuf = [[AVAudioPCMBuffer alloc] initWithPCMFormat:avFmt frameCapacity:frameCount];
+    pcmBuf.frameLength = frameCount;
+    memcpy(pcmBuf.int16ChannelData[0], pcmData.bytes, pcmData.length);
+
+    if (![wavFile writeFromBuffer:pcmBuf error:error]) {
+        [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+        return NO;
+    }
+    wavFile = nil;
+
+    // Run regular match on the temp file
+    self.inputPath = tmpWav.path;
+    self.streamIn  = NO;  // avoid recursive call
+    BOOL ok = [self runWithError:error];
+    [[NSFileManager defaultManager] removeItemAtURL:tmpWav error:nil];
+    return ok;
 }
 
 @end

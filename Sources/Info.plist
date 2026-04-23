@@ -6,6 +6,10 @@
     <string>com.accretional.macos-vision</string>
     <key>CFBundleName</key>
     <string>macos-vision</string>
+    <key>CFBundleExecutable</key>
+    <string>macos-vision</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>macos-vision transcribes audio files using Apple Speech Recognition.</string>
     <key>NSCameraUsageDescription</key>

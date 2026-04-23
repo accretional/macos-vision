@@ -1,4 +1,5 @@
 #import "imagetransfer/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -37,6 +38,7 @@ static void printHelp(void) {
         "  --thumb-size <px>       Max thumbnail dimension in pixels\n"
         "  --dpi <n>               Scan resolution in DPI (default: scanner preferred)\n"
         "  --format <fmt>          Scanner output format: tiff (default), jpeg, png\n"
+        "  --catalog-timeout <s>   Seconds to wait for camera file catalog (default: 15)\n"
         "  --debug                 Emit processing_ms in output\n"
     );
 }
@@ -53,6 +55,7 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
     NSInteger thumbSize    = 0;
     NSInteger dpi          = 0;
     NSString *format       = nil;  // let ICCProcessor default to "tiff"
+    NSTimeInterval catalogTimeout = 15.0;
     BOOL debug             = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
@@ -66,13 +69,14 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--file-index"] && i+1 < (NSInteger)args.count)       { fileIndex   = [args[++i] integerValue]; }
         else if ([a isEqualToString:@"--thumb-size"] && i+1 < (NSInteger)args.count)       { thumbSize   = [args[++i] integerValue]; }
         else if ([a isEqualToString:@"--dpi"] && i+1 < (NSInteger)args.count)              { dpi         = [args[++i] integerValue]; }
+        else if ([a isEqualToString:@"--catalog-timeout"] && i+1 < (NSInteger)args.count) { catalogTimeout = [args[++i] doubleValue]; }
         else if ([a isEqualToString:@"--format"] && i+1 < (NSInteger)args.count)           { format      = args[++i]; }
         else if ([a isEqualToString:@"--all"])          { allFiles    = YES; }
         else if ([a isEqualToString:@"--delete-after"]) { deleteAfter = YES; }
         else if ([a isEqualToString:@"--sidecars"])     { sidecars    = YES; }
         else if ([a isEqualToString:@"--debug"])        { debug       = YES; }
+        else if ([a isEqualToString:@"--no-stream"])    { /* explicit file mode; stream is auto-detected */ }
         else {
-            fprintf(stderr, "imagetransfer: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"imagetransfer: unknown option '%@'", a]}];
@@ -89,6 +93,15 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
     else if (jsonOutput.length && isDir(jsonOutput))    resolvedJSON = [jsonOutput stringByAppendingPathComponent:jsonName];
     else if ([output.pathExtension.lowercaseString isEqualToString:@"json"]) resolvedJSON = output;
 
+    // Stream-out: auto-detect when stdout is piped for device→stream operations
+    static NSSet *streamableOps = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        streamableOps = [NSSet setWithArray:@[@"camera/thumbnail", @"scanner/preview", @"scanner/scan"]];
+    });
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    BOOL streamOut   = stdoutPiped && [streamableOps containsObject:operation];
+
     ICCProcessor *p = [[ICCProcessor alloc] init];
     p.operation        = operation;
     p.jsonOutput       = resolvedJSON;
@@ -99,7 +112,9 @@ BOOL MVDispatchImageTransfer(NSArray<NSString *> *args, NSError **error) {
     p.downloadSidecars = sidecars;
     p.thumbSize        = thumbSize;
     p.scanDPI          = (NSUInteger)dpi;
+    p.catalogTimeout   = catalogTimeout;
     p.debug            = debug;
+    p.streamOut        = streamOut;
     if (format.length)  p.outputFormat = format;
     if (output.length)  p.outputPath   = output;
     return [p runWithError:error];

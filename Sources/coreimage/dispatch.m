@@ -1,4 +1,5 @@
 #import "coreimage/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -49,6 +50,7 @@ BOOL MVDispatchCoreImage(NSArray<NSString *> *args, NSError **error) {
     BOOL applyFilters      = NO;
     BOOL categoryOnly      = NO;
     BOOL debug             = NO;
+    BOOL noStream          = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -65,8 +67,11 @@ BOOL MVDispatchCoreImage(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--apply"])         { applyFilters = YES; }
         else if ([a isEqualToString:@"--category-only"]) { categoryOnly = YES; }
         else if ([a isEqualToString:@"--debug"])          { debug        = YES; }
+        else if ([a isEqualToString:@"--no-stream"]) { noStream = YES; }
+        else if ([a isEqualToString:@"--stream"]) {
+            fprintf(stderr, "warning: --stream is deprecated; stream mode is now detected automatically\n");
+        }
         else {
-            fprintf(stderr, "coreimage: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"coreimage: unknown option '%@'", a]}];
@@ -95,6 +100,11 @@ BOOL MVDispatchCoreImage(NSArray<NSString *> *args, NSError **error) {
     if (output.length && !isDir(output) && ![output.pathExtension.lowercaseString isEqualToString:@"json"])
         outputPath = output;
 
+    BOOL stdinPiped  = !isatty(STDIN_FILENO);
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    BOOL streamIn    = !noStream && stdinPiped && !inputPath.length;
+    BOOL streamOut   = !noStream && stdoutPiped;
+
     CIProcessor *p = [[CIProcessor alloc] init];
     p.inputPath        = inputPath;
     p.jsonOutput       = resolvedJSON;
@@ -107,5 +117,8 @@ BOOL MVDispatchCoreImage(NSArray<NSString *> *args, NSError **error) {
     p.applyFilters     = applyFilters;
     p.categoryOnly     = categoryOnly;
     p.debug            = debug;
+    p.stream           = streamIn;
+    p.streamOut        = streamOut;
+    if ((streamIn || streamOut) && output.length) p.ndjsonOutput = output;
     return [p runWithError:error];
 }

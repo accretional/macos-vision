@@ -27,11 +27,16 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) NSInteger thumbSize;
 /// Seconds to run ICDeviceBrowser before collecting results (default 2.0).
 @property (nonatomic, assign) NSTimeInterval browseTimeout;
+/// Seconds to wait for the camera's content catalog to complete (default 15.0).
+@property (nonatomic, assign) NSTimeInterval catalogTimeout;
 /// Scan resolution in DPI (0 = use scanner's preferred resolution).
 @property (nonatomic, assign) NSUInteger scanDPI;
 /// Output format for scanner/scan: "tiff" (default), "jpeg", "png".
 @property (nonatomic, copy, nullable) NSString *outputFormat;
 @property (nonatomic, assign) BOOL debug;
+/// When YES and stdout is piped, write device images as MJPEG frames to stdout instead of files.
+/// Supported for camera/thumbnail, scanner/preview, scanner/scan.
+@property (nonatomic, assign) BOOL streamOut;
 
 - (BOOL)runWithError:(NSError **)error;
 

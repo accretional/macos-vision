@@ -1,4 +1,5 @@
 #import "streamcapture/main.h"
+#include <unistd.h>
 
 static BOOL isDir(NSString *p) {
     if (!p.length) return NO;
@@ -37,6 +38,14 @@ static void printHelp(void) {
         "  --preview               Show a live preview window before/during capture\n"
         "                          photo: window shows feed, press ENTER to shoot\n"
         "                          video/screen-record: press ENTER to start, ENTER to stop\n"
+        "  --fps <n>               Target frame rate for video stream (default: 30)\n"
+        "  --jpeg-quality <0-1>    JPEG quality for MJPEG stream (default: 0.85)\n"
+        "  --sample-rate <hz>      Audio sample rate for audio stream (default: 16000)\n"
+        "  --channels <n>          Audio channel count for audio stream (default: 1)\n"
+        "  --bit-depth <n>         Audio bit depth for audio stream (default: 16)\n"
+        "  --no-stream             Force file mode even when stdout is piped\n"
+        "                          Stream mode is detected automatically when stdout is piped.\n"
+        "                          Streams MJPEG (video) or MVAU (audio) to stdout; pipe into face/overlay\n"
         "  --debug                 Emit processing_ms in output\n"
     );
 }
@@ -51,9 +60,15 @@ BOOL MVDispatchStreamCapture(NSArray<NSString *> *args, NSError **error) {
     NSTimeInterval duration = 0;
     NSString *format       = @"mp4";
     NSString *types        = nil;
-    BOOL noAudio = NO;
-    BOOL preview = NO;
-    BOOL debug = NO;
+    NSInteger fps          = 30;
+    double jpegQuality     = 0.85;
+    uint32_t sampleRate    = 16000;
+    uint8_t  audioChannels = 1;
+    uint8_t  audioBitDepth = 16;
+    BOOL noAudio  = NO;
+    BOOL preview  = NO;
+    BOOL debug    = NO;
+    BOOL noStream = NO;
 
     for (NSInteger i = 2; i < (NSInteger)args.count; i++) {
         NSString *a = args[i];
@@ -68,11 +83,20 @@ BOOL MVDispatchStreamCapture(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--duration"] && i+1 < (NSInteger)args.count)         { duration     = [args[++i] doubleValue]; }
         else if ([a isEqualToString:@"--format"] && i+1 < (NSInteger)args.count)           { format       = args[++i]; }
         else if ([a isEqualToString:@"--types"] && i+1 < (NSInteger)args.count)            { types        = args[++i]; }
-        else if ([a isEqualToString:@"--no-audio"]) { noAudio  = YES; }
-        else if ([a isEqualToString:@"--preview"])  { preview  = YES; }
-        else if ([a isEqualToString:@"--debug"]) { debug = YES; }
+        else if ([a isEqualToString:@"--fps"] && i+1 < (NSInteger)args.count)             { fps          = [args[++i] integerValue]; }
+        else if ([a isEqualToString:@"--jpeg-quality"] && i+1 < (NSInteger)args.count)   { jpegQuality  = [args[++i] doubleValue]; }
+        else if ([a isEqualToString:@"--sample-rate"] && i+1 < (NSInteger)args.count)    { sampleRate   = (uint32_t)[args[++i] integerValue]; }
+        else if ([a isEqualToString:@"--channels"] && i+1 < (NSInteger)args.count)       { audioChannels= (uint8_t)[args[++i] integerValue]; }
+        else if ([a isEqualToString:@"--bit-depth"] && i+1 < (NSInteger)args.count)      { audioBitDepth= (uint8_t)[args[++i] integerValue]; }
+        else if ([a isEqualToString:@"--no-audio"])  { noAudio  = YES; }
+        else if ([a isEqualToString:@"--preview"])   { preview  = YES; }
+        else if ([a isEqualToString:@"--debug"])     { debug    = YES; }
+        else if ([a isEqualToString:@"--no-stream"]) { noStream = YES; }
+        else if ([a isEqualToString:@"--stream"]) {
+            // deprecated: stream is now auto-detected
+            fprintf(stderr, "warning: --stream is deprecated; stream mode is now detected automatically\n");
+        }
         else {
-            fprintf(stderr, "streamcapture: unknown option '%s'\n", a.UTF8String);
             printHelp();
             if (error) *error = [NSError errorWithDomain:@"MVDispatch" code:1
                 userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"streamcapture: unknown option '%@'", a]}];
@@ -89,18 +113,30 @@ BOOL MVDispatchStreamCapture(NSArray<NSString *> *args, NSError **error) {
                                 : (![operation isEqualToString:@"list-devices"] && isDir(output)) ? output
                                 : nil;
 
+    // For most operations, stream = stdoutPiped (source: device → MJPEG/MVAU out).
+    // For barcode in filter mode, stream = stdinPiped (MJPEG in → MJPEG out with X-MV headers).
+    BOOL stdinPiped  = !isatty(STDIN_FILENO);
+    BOOL stdoutPiped = !isatty(STDOUT_FILENO);
+    BOOL stream = !noStream && ([operation isEqualToString:@"barcode"] ? stdinPiped : stdoutPiped);
+
     CaptureProcessor *p = [[CaptureProcessor alloc] init];
-    p.operation    = operation;
-    p.mediaOutput  = output;
-    p.artifactsDir = resolvedArtifacts;
-    p.jsonOutput   = resolvedJSON;
-    p.displayIndex = displayIndex;
-    p.deviceIndex  = deviceIndex;
-    p.duration     = duration;
-    p.format       = format;
-    p.types        = types;
-    p.noAudio      = noAudio;
-    p.preview      = preview;
-    p.debug        = debug;
+    p.operation        = operation;
+    p.mediaOutput      = output;
+    p.artifactsDir     = resolvedArtifacts;
+    p.jsonOutput       = resolvedJSON;
+    p.displayIndex     = displayIndex;
+    p.deviceIndex      = deviceIndex;
+    p.duration         = duration;
+    p.format           = format;
+    p.types            = types;
+    p.noAudio          = noAudio;
+    p.preview          = preview;
+    p.debug            = debug;
+    p.stream           = stream;
+    p.fps              = fps;
+    p.jpegQuality      = jpegQuality;
+    p.audioSampleRate  = sampleRate;
+    p.audioChannels    = audioChannels;
+    p.audioBitDepth    = audioBitDepth;
     return [p runWithError:error];
 }

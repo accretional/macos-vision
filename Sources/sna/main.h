@@ -21,6 +21,14 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, assign) double overlapFactor;
 @property (nonatomic, assign) BOOL overlapFactorSet;
 @property (nonatomic, assign) BOOL debug;
+/// Read MVAU or raw PCM audio from stdin and classify (auto-detected when stdin is piped).
+@property (nonatomic, assign) BOOL streamIn;
+/// Sample rate for raw PCM fallback (default: 16000).
+@property (nonatomic, assign) uint32_t sampleRate;
+/// Channel count for raw PCM fallback (default: 1).
+@property (nonatomic, assign) uint8_t  channels;
+/// Bit depth for raw PCM fallback (default: 16).
+@property (nonatomic, assign) uint8_t  bitDepth;
 
 - (BOOL)runWithError:(NSError **)error;
 
