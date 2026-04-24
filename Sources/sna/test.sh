@@ -33,10 +33,6 @@ err=$("$BINARY" sna --input /no/such/file.wav --operation classify --output "$TM
 echo "$err" | grep -qi "error\|fail\|no such\|could not" \
     && pass "sna: missing file error shown" || fail "sna: missing file not rejected"
 
-err=$("$BINARY" sna --input "$AUDIO" --operation classify-custom --output "$TMP/x.json" 2>&1 || true)
-echo "$err" | grep -qi "model\|--model\|error" \
-    && pass "sna: classify-custom without --model rejected" || fail "sna: classify-custom without --model not rejected"
-
 err=$("$BINARY" sna --input "$AUDIO" --operation classify --classify-overlap 1.5 --output "$TMP/x.json" 2>&1 || true)
 echo "$err" | grep -qi "overlap\|\[0\|error" \
     && pass "sna: invalid overlap rejected" || fail "sna: invalid overlap not rejected"

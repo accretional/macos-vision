@@ -82,9 +82,11 @@ BOOL MVDispatchShazam(NSArray<NSString *> *args, NSError **error) {
 
     NSString *resolvedArtifacts = artifactsDir.length ? artifactsDir : (isDir(output) ? output : nil);
 
-    // Auto-detect stream-in mode: active when stdin is piped and --no-stream not set
+    // Auto-detect stream-in mode: active when stdin is piped, no explicit --input
+    // file was provided, and --no-stream is not set. An explicit --input always
+    // takes precedence over piped stdin.
     BOOL stdinPiped = !isatty(STDIN_FILENO);
-    BOOL streamIn   = !noStream && stdinPiped;
+    BOOL streamIn   = !noStream && stdinPiped && !inputPath.length;
 
     ShazamProcessor *p = [[ShazamProcessor alloc] init];
     p.inputPath    = inputPath;
@@ -97,5 +99,14 @@ BOOL MVDispatchShazam(NSArray<NSString *> *args, NSError **error) {
     p.sampleRate   = sampleRate;
     p.channels     = channels;
     p.bitDepth     = bitDepth;
-    return [p runWithError:error];
+    BOOL ok = [p runWithError:error];
+    // SHSession keeps internal networking threads alive even after the match
+    // completes or times out, causing the process to hang for the TCP connection
+    // timeout (~60 s) during ARC teardown. Print any error and force-exit to
+    // avoid blocking on session teardown.
+    if (!ok && error && *error)
+        fprintf(stderr, "Error: %s\n", (*error).localizedDescription.UTF8String);
+    fflush(stdout);
+    fflush(stderr);
+    _exit(ok ? 0 : 1);
 }

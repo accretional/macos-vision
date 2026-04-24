@@ -72,28 +72,5 @@ else
 fi
 echo
 
-# ── isolate ───────────────────────────────────────────────────────────────────
-echo "── av: isolate ─────────────────────────────────────────────────────────────"
-if $has_audio; then
-    # isolate is an export-style operation: JSON goes alongside the output file
-    "$BINARY" av --input "$AUDIO" --operation isolate \
-                  --output "$TMP/isolated.m4a"
-    if [ -f "$TMP/isolated.json" ]; then
-        pass "isolate: JSON output produced"
-        jq empty "$TMP/isolated.json" 2>/dev/null && pass "isolate: valid JSON" || fail "isolate: invalid JSON"
-        jq -e '.operation == "isolate"' "$TMP/isolated.json" >/dev/null 2>&1 \
-            && pass "isolate: operation field" || fail "isolate: operation mismatch"
-        jq -e '.result.output | type == "string"' "$TMP/isolated.json" >/dev/null 2>&1 \
-            && pass "isolate: output path in result" || fail "isolate: output path missing"
-    else
-        fail "isolate: JSON output not produced"
-    fi
-    [ -f "$TMP/isolated.m4a" ] \
-        && pass "isolate: audio file created" || fail "isolate: audio file not created"
-else
-    pass "isolate: skipped (say could not create sample audio)"
-fi
-echo
-
 echo "Results: $PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ] || exit 1

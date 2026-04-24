@@ -4,14 +4,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface SNAProcessor : NSObject
 
-/// Audio file path (required for classify and classify-custom; omit for list-labels).
+/// Audio file path (required for classify and detect; omit for list-labels).
 @property (nonatomic, copy, nullable) NSString *inputPath;
 /// JSON envelope output path, or stdout when omitted.
 @property (nonatomic, copy, nullable) NSString *jsonOutput;
-/// Operation: classify | classify-custom | detect | list-labels
+/// Operation: classify | detect | list-labels
 @property (nonatomic, copy) NSString *operation;
-/// Path to a CoreML audio classification model (required for classify-custom; optional for list-labels).
-@property (nonatomic, copy, nullable) NSString *modelPath;
 /// Top-K results per classification window (default 5).
 @property (nonatomic, assign) NSInteger topk;
 /// Override analysis window duration in seconds (macOS 12+; 0 = use model default).

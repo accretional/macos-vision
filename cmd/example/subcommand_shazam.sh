@@ -31,11 +31,15 @@ run_file "match" "$music_audio" \
                      --output "$OUTPUT/${MUSIC_BASE}_match.json"
 
 # ── build (catalog from input audio directory) ────────────────────────────────
-run_file "build" "$music_audio" \
+if [ -d "$AUDIO_DIR" ]; then
+    echo "  RUN   build"
     "$BINARY" shazam --input "$AUDIO_DIR" \
-                      --operation build \
-                      --artifacts-dir "$OUTPUT" \
-                      --output "$OUTPUT/audios_catalog_build.json"
+                     --operation build \
+                     --artifacts-dir "$OUTPUT" \
+                     --output "$OUTPUT/audios_catalog_build.json"
+else
+    echo "  SKIP  build ($AUDIO_DIR not found)"
+fi
 
 # ── match-custom (against the catalog we just built) ─────────────────────────
 CATALOG="$OUTPUT/audios.shazamcatalog"

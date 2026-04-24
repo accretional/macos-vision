@@ -35,6 +35,7 @@ filename_base() {
 
 VID_BASE="$(filename_base "$VID")"
 AUD_BASE="$(filename_base "$AUD")"
+AUD_TTS_BASE="$(filename_base "$AV_TTS_INPUT")"
 
 # ── presets ───────────────────────────────────────────────────────────────────
 run_file "presets" "$VID" \
@@ -172,4 +173,4 @@ run_file "retime (0.5x)" "$VID" \
 run "tts (from file)" \
     "$BINARY" av --operation tts \
                  --input "$AV_TTS_INPUT" \
-                 --output "$OUTPUT/tts_joker.m4a"
+                 --output "$OUTPUT/${AUD_TTS_BASE}_tts.m4a"

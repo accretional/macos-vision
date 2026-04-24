@@ -3,7 +3,6 @@
 #import "common/MVAudioStream.h"
 #import <SoundAnalysis/SoundAnalysis.h>
 #import <AVFoundation/AVFoundation.h>
-#import <CoreML/CoreML.h>
 #import <CoreMedia/CoreMedia.h>
 
 static NSString * const SNAErrorDomain = @"SNAProcessorError";
@@ -119,7 +118,7 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
 // ── Public entry point ────────────────────────────────────────────────────────
 
 - (BOOL)runWithError:(NSError **)error {
-    NSArray *validOps = @[@"classify", @"classify-custom", @"detect", @"list-labels"];
+    NSArray *validOps = @[@"classify", @"detect", @"list-labels"];
     if (![validOps containsObject:self.operation]) {
         if (error) {
             *error = [NSError errorWithDomain:SNAErrorDomain code:1
@@ -153,8 +152,6 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
 
     if ([self.operation isEqualToString:@"classify"]) {
         result = [self classifyBuiltinFromURL:fileURL error:error];
-    } else if ([self.operation isEqualToString:@"classify-custom"]) {
-        result = [self classifyCustomFromURL:fileURL error:error];
     } else if ([self.operation isEqualToString:@"detect"]) {
         result = [self detectBuiltinFromURL:fileURL error:error];
     }
@@ -247,46 +244,6 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
     }
 }
 
-// ── classify-custom (CoreML model, macOS 10.15+) ──────────────────────────────
-
-- (nullable NSDictionary *)classifyCustomFromURL:(NSURL *)fileURL error:(NSError **)error {
-    if (!self.modelPath.length) {
-        if (error) {
-            *error = [NSError errorWithDomain:SNAErrorDomain code:40
-                                     userInfo:@{NSLocalizedDescriptionKey:
-                                                    @"classify-custom requires --model <path_to_CoreML_model>"}];
-        }
-        return nil;
-    }
-
-    NSURL *modelURL = [NSURL fileURLWithPath:self.modelPath];
-    MLModel *mlModel = [MLModel modelWithContentsOfURL:modelURL error:error];
-    if (!mlModel) return nil;
-
-    SNClassifySoundRequest *request = [[SNClassifySoundRequest alloc] initWithMLModel:mlModel error:error];
-    if (!request) return nil;
-    if (![self configureRequest:request error:error]) return nil;
-
-    NSDate *start = self.debug ? [NSDate date] : nil;
-    NSArray *windows = [self runAnalysis:request fileURL:fileURL error:error];
-    if (!windows) return nil;
-
-    NSMutableDictionary *result = [@{
-        @"classifier": @"custom",
-        @"model":      MVRelativePath(self.modelPath),
-        @"path":       MVRelativePath(fileURL.path),
-        @"windows":    windows,
-    } mutableCopy];
-    if (@available(macOS 12.0, *)) {
-        result[@"overlap_factor"]    = @(request.overlapFactor);
-        result[@"window_duration_s"] = @(CMTimeGetSeconds(request.windowDuration));
-    }
-    if (self.debug && start) {
-        result[@"processing_ms"] = @((NSInteger)([[NSDate date] timeIntervalSinceDate:start] * 1000.0));
-    }
-    return result;
-}
-
 // ── detect (built-in classifier, filter to target sound keywords) ─────────────
 
 - (nullable NSDictionary *)detectBuiltinFromURL:(NSURL *)fileURL error:(NSError **)error {
@@ -352,24 +309,14 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
 
 - (nullable NSDictionary *)listLabelsWithError:(NSError **)error {
     if (@available(macOS 12.0, *)) {
-        SNClassifySoundRequest *request = nil;
-
-        if (self.modelPath.length) {
-            NSURL *modelURL = [NSURL fileURLWithPath:self.modelPath];
-            MLModel *mlModel = [MLModel modelWithContentsOfURL:modelURL error:error];
-            if (!mlModel) return nil;
-            request = [[SNClassifySoundRequest alloc] initWithMLModel:mlModel error:error];
-        } else {
-            request = [[SNClassifySoundRequest alloc] initWithClassifierIdentifier:SNClassifierIdentifierVersion1
-                                                                             error:error];
-        }
+        SNClassifySoundRequest *request =
+            [[SNClassifySoundRequest alloc] initWithClassifierIdentifier:SNClassifierIdentifierVersion1
+                                                                   error:error];
         if (!request) return nil;
 
         NSArray<NSString *> *labels = [request.knownClassifications
                                        sortedArrayUsingSelector:@selector(compare:)];
-        NSString *classifier = self.modelPath.length
-            ? [@"custom:" stringByAppendingString:MVRelativePath(self.modelPath)]
-            : @"built-in:v1";
+        NSString *classifier = @"built-in:v1";
 
         return @{
             @"classifier": classifier,
@@ -409,25 +356,13 @@ static NSString * const SNAErrorDomain = @"SNAProcessorError";
 
     // Build the request
     SNClassifySoundRequest *request = nil;
-    if ([self.operation isEqualToString:@"classify-custom"]) {
-        if (!self.modelPath.length) {
-            if (error) *error = [NSError errorWithDomain:SNAErrorDomain code:40
-                userInfo:@{NSLocalizedDescriptionKey: @"classify-custom requires --model <path>"}];
-            return NO;
-        }
-        MLModel *mlModel = [MLModel modelWithContentsOfURL:[NSURL fileURLWithPath:self.modelPath]
-                                                     error:error];
-        if (!mlModel) return NO;
-        request = [[SNClassifySoundRequest alloc] initWithMLModel:mlModel error:error];
+    if (@available(macOS 12.0, *)) {
+        request = [[SNClassifySoundRequest alloc]
+            initWithClassifierIdentifier:SNClassifierIdentifierVersion1 error:error];
     } else {
-        if (@available(macOS 12.0, *)) {
-            request = [[SNClassifySoundRequest alloc]
-                initWithClassifierIdentifier:SNClassifierIdentifierVersion1 error:error];
-        } else {
-            if (error) *error = [NSError errorWithDomain:SNAErrorDomain code:30
-                userInfo:@{NSLocalizedDescriptionKey: @"classify stream requires macOS 12.0+"}];
-            return NO;
-        }
+        if (error) *error = [NSError errorWithDomain:SNAErrorDomain code:30
+            userInfo:@{NSLocalizedDescriptionKey: @"classify stream requires macOS 12.0+"}];
+        return NO;
     }
     if (!request) return NO;
     if (![self configureRequest:request error:error]) return NO;

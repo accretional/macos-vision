@@ -19,15 +19,13 @@ static void printHelp(void) {
         "\n"
         "OPERATIONS:\n"
         "  classify        (default) Classify audio with Apple's built-in sound classifier\n"
-        "  classify-custom Classify audio with a custom CoreML model (requires --model)\n"
-        "  list-labels     List labels supported by Apple's classifier (or a custom --model)\n"
+        "  list-labels     List labels supported by Apple's classifier\n"
         "\n"
         "OPTIONS:\n"
         "  --input <path>              Audio file to analyse (required for classify)\n"
         "  --operation <op>            Operation to run (default: classify)\n"
         "  --output <path>             Directory or .json file for JSON output\n"
         "  --json-output <path>        Write JSON envelope to this file (default: stdout)\n"
-        "  --model <path>              CoreML audio classifier model (classify-custom / list-labels)\n"
         "  --topk <n>                  Top-K results per window (default: 3)\n"
         "  --classify-window <secs>    Analysis window duration in seconds\n"
         "  --classify-overlap <frac>   Overlap factor between windows, [0.0, 1.0)\n"
@@ -45,7 +43,6 @@ BOOL MVDispatchSNA(NSArray<NSString *> *args, NSError **error) {
     NSString *operation    = @"classify";
     NSString *output       = nil;
     NSString *jsonOutput   = nil;
-    NSString *modelPath    = nil;
     NSInteger topk         = 3;
     NSTimeInterval window  = 0;
     BOOL windowSet         = NO;
@@ -64,7 +61,6 @@ BOOL MVDispatchSNA(NSArray<NSString *> *args, NSError **error) {
         else if ([a isEqualToString:@"--operation"] && i+1 < (NSInteger)args.count)            { operation = args[++i]; }
         else if ([a isEqualToString:@"--output"] && i+1 < (NSInteger)args.count)               { output    = args[++i]; }
         else if ([a isEqualToString:@"--json-output"] && i+1 < (NSInteger)args.count)          { jsonOutput= args[++i]; }
-        else if ([a isEqualToString:@"--model"] && i+1 < (NSInteger)args.count)                { modelPath = args[++i]; }
         else if ([a isEqualToString:@"--topk"] && i+1 < (NSInteger)args.count)                 { topk      = [args[++i] integerValue]; }
         else if ([a isEqualToString:@"--classify-window"] && i+1 < (NSInteger)args.count)      { window    = [args[++i] doubleValue]; windowSet  = YES; }
         else if ([a isEqualToString:@"--classify-overlap"] && i+1 < (NSInteger)args.count)     { overlap   = [args[++i] doubleValue]; overlapSet = YES; }
@@ -96,7 +92,6 @@ BOOL MVDispatchSNA(NSArray<NSString *> *args, NSError **error) {
     p.inputPath         = inputPath;
     p.jsonOutput        = resolvedJSON;
     p.operation         = operation;
-    p.modelPath         = modelPath;
     p.topk              = topk;
     p.windowDuration    = window;
     p.windowDurationSet = windowSet;
