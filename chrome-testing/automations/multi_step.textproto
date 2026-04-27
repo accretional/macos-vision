@@ -1,0 +1,52 @@
+name: "multi_step"
+
+steps: {
+  label: "set_viewport"
+  set_viewport: {
+    width: 1440
+    height: 900
+    device_scale_factor: 2
+  }
+}
+
+steps: {
+  label: "navigate_home"
+  navigate: {
+    url: "https://example.com"
+  }
+}
+
+steps: {
+  label: "wait_initial"
+  wait: {
+    milliseconds: 300
+  }
+}
+
+steps: {
+  label: "screenshot_home"
+  screenshot: {
+    format: "png"
+  }
+}
+
+steps: {
+  label: "navigate_iana"
+  navigate: {
+    url: "https://www.iana.org/domains/reserved"
+  }
+}
+
+steps: {
+  label: "wait_second"
+  wait: {
+    milliseconds: 500
+  }
+}
+
+steps: {
+  label: "screenshot"
+  screenshot: {
+    format: "png"
+  }
+}

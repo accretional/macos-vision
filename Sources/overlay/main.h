@@ -54,6 +54,8 @@ NS_ASSUME_NONNULL_BEGIN
 // ─────────────────────────────────────────────────────────────────────────────
 
 @interface SVGOverlay : NSObject
+/// When YES, a visible text label is drawn next to each rect/polygon that has a label.
+@property (nonatomic, assign) BOOL showLabels;
 - (instancetype)initWithImagePath:(nullable NSString *)imagePath;
 - (void)addShape:(SVGShape *)shape;
 - (void)addShapes:(NSArray<SVGShape *> *)shapes;
@@ -71,13 +73,20 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *jsonPath;
 /// Override image path. If nil, falls back to info.filepath inside the JSON.
 @property (nonatomic, copy, nullable) NSString *inputPath;
-/// Path to the .svg file to write. If nil, writes <jsonBasename>.svg next to the JSON.
+/// Path to the output file. For SVG mode: .svg file (default: <jsonBasename>.svg beside the JSON).
+/// For MJPEG→file mode: image file path (.jpg/.png/etc.) — writes the last annotated frame.
 @property (nonatomic, copy, nullable) NSString *svgOutput;
 /// JSON envelope written to this file, or stdout if nil.
 @property (nonatomic, copy, nullable) NSString *jsonOutput;
+/// Read MJPEG from stdin, draw shapes from X-MV-* headers on each frame, write MJPEG to stdout.
+@property (nonatomic, assign) BOOL stream;
+/// When YES, draw visible text labels on rects and polygons (SVG and stream).
+@property (nonatomic, assign) BOOL showLabels;
 
 - (BOOL)runWithError:(NSError **)error;
 
 @end
+
+BOOL MVDispatchOverlay(NSArray<NSString *> *args, NSError **error);
 
 NS_ASSUME_NONNULL_END

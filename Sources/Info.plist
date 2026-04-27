@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.accretional.macos-vision</string>
+    <key>CFBundleName</key>
+    <string>macos-vision</string>
+    <key>CFBundleExecutable</key>
+    <string>macos-vision</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>macos-vision transcribes audio files using Apple Speech Recognition.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>macos-vision captures photos and video from connected cameras.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>macos-vision records audio from the microphone.</string>
+</dict>
+</plist>

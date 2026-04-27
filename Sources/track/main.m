@@ -237,30 +237,28 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 - (BOOL)runOpticalFlowSequence:(NSArray<NSString *> *)imageFiles imgDir:(NSString *)imgDir error:(NSError **)error {
     if (@available(macOS 14.0, *)) {
-        if (!self.artifactsDir.length) {
-            if (error) {
-                *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorMissingInput
-                                        userInfo:@{NSLocalizedDescriptionKey:
-                                                       @"optical-flow requires --artifacts-dir (directory for flow PNG frames)"}];
-            }
-            return NO;
-        }
         VNSequenceRequestHandler *seqHandler = [[VNSequenceRequestHandler alloc] init];
         NSMutableArray *frames = [NSMutableArray array];
         __block NSUInteger frameIndex = 0;
         __block NSUInteger flowFramesSaved = 0;
-        NSString *outDir = self.artifactsDir;
+        NSString *outDir = self.artifactsDir.length
+            ? self.artifactsDir
+            : [[NSFileManager defaultManager] currentDirectoryPath];
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:outDir]) {
+            if (![fm createDirectoryAtPath:outDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
+        }
 
         VNTrackOpticalFlowRequest *req = [[VNTrackOpticalFlowRequest alloc]
             initWithFrameAnalysisSpacing:CMTimeMake(1, 30)
             completionHandler:^(VNRequest *r, NSError *e) {
                 VNPixelBufferObservation *obs = (VNPixelBufferObservation *)r.results.firstObject;
-                if (obs && outDir) {
-                    // Save the flow pixel buffer as PNG via CIImage
+                if (obs) {
                     CIImage *flowImage = [CIImage imageWithCVPixelBuffer:obs.pixelBuffer];
                     CIContext *ctx = [CIContext contextWithOptions:nil];
                     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-                    NSString *filename = [NSString stringWithFormat:@"flow_%04lu.png", (unsigned long)flowFramesSaved];
+                    NSString *filename = [NSString stringWithFormat:@"track_optical_flow_%04lu.png", (unsigned long)flowFramesSaved];
                     NSString *path = [outDir stringByAppendingPathComponent:filename];
                     [ctx writePNGRepresentationOfImage:flowImage toURL:[NSURL fileURLWithPath:path]
                                                format:kCIFormatRGBA8 colorSpace:cs options:@{} error:nil];
@@ -286,7 +284,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
             @"flowsSaved":  @(flowFramesSaved),
             @"frames":      frames,
         };
-        return [self saveJSON:json error:error];
+        return [self saveJSON:json flowDir:outDir error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"optical-flow requires macOS 14.0+"}];
@@ -454,27 +452,27 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 
 - (BOOL)runOpticalFlowVideo:(VNVideoProcessor *)processor videoName:(NSString *)videoName error:(NSError **)error API_AVAILABLE(macos(14.0)) {
     if (@available(macOS 14.0, *)) {
-        if (!self.artifactsDir.length) {
-            if (error) {
-                *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorMissingInput
-                                        userInfo:@{NSLocalizedDescriptionKey:
-                                                       @"optical-flow requires --artifacts-dir (directory for flow PNG frames)"}];
-            }
-            return NO;
+        NSString *outDir = self.artifactsDir.length
+            ? self.artifactsDir
+            : [[NSFileManager defaultManager] currentDirectoryPath];
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        if (![fm fileExistsAtPath:outDir]) {
+            if (![fm createDirectoryAtPath:outDir withIntermediateDirectories:YES attributes:nil error:error]) return NO;
         }
+
         __block NSUInteger frameIndex = 0;
         __block NSUInteger flowsSaved = 0;
-        NSString *outDir = self.artifactsDir;
 
         VNTrackOpticalFlowRequest *req = [[VNTrackOpticalFlowRequest alloc]
             initWithFrameAnalysisSpacing:CMTimeMake(1, 30)
             completionHandler:^(VNRequest *r, NSError *e) {
                 VNPixelBufferObservation *obs = (VNPixelBufferObservation *)r.results.firstObject;
-                if (obs && outDir) {
+                if (obs) {
                     CIImage *flowImage = [CIImage imageWithCVPixelBuffer:obs.pixelBuffer];
                     CIContext *ctx = [CIContext contextWithOptions:nil];
                     CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-                    NSString *filename = [NSString stringWithFormat:@"%@_flow_%04lu.png", videoName, (unsigned long)flowsSaved];
+                    NSString *filename = [NSString stringWithFormat:@"track_optical_flow_%04lu.png", (unsigned long)flowsSaved];
                     NSString *path = [outDir stringByAppendingPathComponent:filename];
                     [ctx writePNGRepresentationOfImage:flowImage toURL:[NSURL fileURLWithPath:path]
                                                format:kCIFormatRGBA8 colorSpace:cs options:@{} error:nil];
@@ -497,7 +495,7 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
             @"frameCount": @(frameIndex),
             @"flowsSaved": @(flowsSaved),
         };
-        return [self saveJSON:json error:error];
+        return [self saveJSON:json flowDir:outDir error:error];
     } else {
         if (error) *error = [NSError errorWithDomain:TrackErrorDomain code:TrackErrorUnsupportedOS
                                             userInfo:@{NSLocalizedDescriptionKey: @"optical-flow requires macOS 14.0+"}];
@@ -527,10 +525,14 @@ typedef NS_ENUM(NSInteger, TrackErrorCode) {
 }
 
 - (BOOL)saveJSON:(NSDictionary *)json error:(NSError **)error {
+    return [self saveJSON:json flowDir:nil error:error];
+}
+
+- (BOOL)saveJSON:(NSDictionary *)json flowDir:(NSString *)flowDir error:(NSError **)error {
     NSString *op = json[@"operation"] ?: @"track";
     NSMutableArray *extra = [NSMutableArray array];
-    if ([op isEqualToString:@"optical-flow"] && self.artifactsDir.length) {
-        [extra addObject:MVArtifactEntry(self.artifactsDir, @"optical_flow_frames")];
+    if ([op isEqualToString:@"optical-flow"] && flowDir.length) {
+        [extra addObject:MVArtifactEntry(flowDir, @"optical_flow_frames")];
     }
     NSDictionary *merged = MVResultByMergingArtifacts(json, extra);
     NSDictionary *envelope = MVMakeEnvelope(@"track", op, self.inputPath, merged);

@@ -15,7 +15,7 @@ if [ ! -f "$img" ]; then fail "gorilla.jpg not found"; echo "0 passed, 1 failed"
 
 # ── classify ──────────────────────────────────────────────────────────────────
 echo "── classify: classify ───────────────────────────────────────────────────────"
-"$BINARY" classify --input "$img" --operation classify --output "$TMP"
+"$BINARY" classify --input "$img" --operation classify --output "$TMP" --no-stream
 got="$TMP/gorilla_classify.json"
 if [ -f "$got" ]; then
     pass "classify: output produced"
@@ -30,7 +30,7 @@ echo
 
 # ── horizon ───────────────────────────────────────────────────────────────────
 echo "── classify: horizon ────────────────────────────────────────────────────────"
-"$BINARY" classify --input "$IMG/sad_pablo.png" --operation horizon --output "$TMP" 2>/dev/null || true
+"$BINARY" classify --input "$IMG/sad_pablo.png" --operation horizon --output "$TMP" --no-stream 2>/dev/null || true
 got="$TMP/sad_pablo_horizon.json"
 if [ -f "$got" ]; then
     pass "horizon: output produced"
@@ -43,7 +43,7 @@ echo
 
 # ── contours ──────────────────────────────────────────────────────────────────
 echo "── classify: contours ───────────────────────────────────────────────────────"
-"$BINARY" classify --input "$img" --operation contours --output "$TMP"
+"$BINARY" classify --input "$img" --operation contours --output "$TMP" --no-stream
 got="$TMP/gorilla_contours.json"
 if [ -f "$got" ]; then
     pass "contours: output produced"
@@ -58,7 +58,7 @@ echo
 
 # ── feature-print ─────────────────────────────────────────────────────────────
 echo "── classify: feature-print ──────────────────────────────────────────────────"
-"$BINARY" classify --input "$img" --operation feature-print --output "$TMP"
+"$BINARY" classify --input "$img" --operation feature-print --output "$TMP" --no-stream
 got="$TMP/gorilla_feature_print.json"
 if [ -f "$got" ]; then
     pass "feature-print: output produced"
@@ -74,7 +74,7 @@ echo
 echo "── classify: error handling ─────────────────────────────────────────────────"
 err=$("$BINARY" classify 2>&1 || true)
 echo "$err" | grep -qi "img\|input\|must be provided\|provide\|error" && pass "classify: missing input error shown" || fail "classify: no error on missing input"
-err=$("$BINARY" classify --input "$img" --operation bad-op 2>&1 || true)
+err=$("$BINARY" classify --input "$img" --operation bad-op --no-stream 2>&1 || true)
 echo "$err" | grep -qi "unknown\|supported\|error" && pass "classify: unknown operation rejected" || fail "classify: unknown operation not rejected"
 echo
 

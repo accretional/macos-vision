@@ -20,31 +20,31 @@ run() {
 }
 
 # ── foreground-mask ───────────────────────────────────────────────────────────
-run "foreground-mask" "$EXAMPLE_IMG_SAD_PABLO" \
-    "$BINARY" segment --input "$EXAMPLE_IMG_SAD_PABLO" \
+run "foreground-mask" "$SEGMENT_FOREGROUND_MASK_INPUT" \
+    "$BINARY" segment --input "$SEGMENT_FOREGROUND_MASK_INPUT" \
                       --operation foreground-mask \
                       --output "$OUTPUT"
 
 # ── person-segment ────────────────────────────────────────────────────────────
-run "person-segment" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
+run "person-segment" "$SEGMENT_PERSON_SEGMENT_INPUT" \
+    "$BINARY" segment --input "$SEGMENT_PERSON_SEGMENT_INPUT" \
                       --operation person-segment \
                       --output "$OUTPUT"
 
 # ── person-mask ───────────────────────────────────────────────────────────────
-run "person-mask" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
+run "person-mask" "$SEGMENT_PERSON_MASK_INPUT" \
+    "$BINARY" segment --input "$SEGMENT_PERSON_MASK_INPUT" \
                       --operation person-mask \
                       --output "$OUTPUT"
 
 # ── attention-saliency ────────────────────────────────────────────────────────
-run "attention-saliency" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
+run "attention-saliency" "$SEGMENT_ATTENTION_SALIENCY_INPUT" \
+    "$BINARY" segment --input "$SEGMENT_ATTENTION_SALIENCY_INPUT" \
                       --operation attention-saliency \
                       --output "$OUTPUT"
 
 # ── objectness-saliency ───────────────────────────────────────────────────────
-run "objectness-saliency" "$EXAMPLE_IMG_GORILLA" \
-    "$BINARY" segment --input "$EXAMPLE_IMG_GORILLA" \
+run "objectness-saliency" "$SEGMENT_OBJECTNESS_SALIENCY_INPUT" \
+    "$BINARY" segment --input "$SEGMENT_OBJECTNESS_SALIENCY_INPUT" \
                       --operation objectness-saliency \
                       --output "$OUTPUT"

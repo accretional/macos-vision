@@ -1,33 +1,70 @@
 {
   "BINARY": ".build/debug/macos-vision",
 
-  "EXAMPLE_IMG_DIR": "sample_data/input/images",
-  "EXAMPLE_TEXT_DIR": "sample_data/input/text",
-  "EXAMPLE_AUDIO_DIR": "sample_data/input/audios",
-  "EXAMPLE_VIDEO_DIR": "sample_data/input/videos",
-  
-  "EXAMPLE_TRACK_FRAMES": "sample_data/input/videos/selective_attention_test_frames",
-  "EXAMPLE_TRACK_VIDEO": "sample_data/input/videos/selective_attention_test.mp4",
-  "EXAMPLE_IMG_HANDWRITING": "sample_data/input/images/handwriting.png",
-  "EXAMPLE_IMG_TEXT_PRINTED": "sample_data/input/images/text_printed.jpg",
-  "EXAMPLE_IMG_BOHEMIAN": "sample_data/input/images/bohemian_rhapsody.jpg",
-  "EXAMPLE_IMG_FRED_YASS": "sample_data/input/images/fred_yass.png",
-  "EXAMPLE_IMG_SPIDERMAN": "sample_data/input/images/spiderman.jpg",
-  "EXAMPLE_IMG_SAD_PABLO": "sample_data/input/images/sad_pablo.png",
-  "EXAMPLE_IMG_CAT_SIDE_EYE": "sample_data/input/images/cat_side_eye.jpg",
-  "EXAMPLE_IMG_GORILLA": "sample_data/input/images/gorilla.jpg",
-  "EXAMPLE_IMG_DOCUMENT": "sample_data/input/images/document.jpg",
-  "EXAMPLE_IMG_RACCOON_COTTON_CANDY": "sample_data/input/images/raccoon_cotton_candy.jpg",
+  "IMG_DIR":   "sample_data/input/images",
+  "TEXT_DIR":  "sample_data/input/text",
+  "AUDIO_DIR": "sample_data/input/audios",
+  "VIDEO_DIR": "sample_data/input/videos",
 
-  "EXAMPLE_VIDEO_KAZOO": "sample_data/input/videos/kazoo_kid_who_are_you.mp4",
+  "AV_VIDEO_INPUT":         "sample_data/input/videos/kazoo_kid_who_are_you.mp4",
+  "AV_AUDIO_INPUT":         "sample_data/input/audios/kazoo_kid_who_are_you.wav",
+  "AV_MIX_INPUT_2":         "sample_data/input/audios/badly_sung_sorry.mp3",
+  "AV_BURN_OVERLAY":        "sample_data/input/images/gorilla.jpg",
+  "AV_TTS_INPUT":           "sample_data/input/text/joker.txt",
 
-  "EXAMPLE_AUDIO_SPEECH": "sample_data/input/audios/kazoo_kid_who_are_you.wav",
-  "EXAMPLE_AUDIO_MUSIC": "sample_data/input/audios/badly_sung_sorry.mp3",
-  "EXAMPLE_AUDIO_SOUNDS": "sample_data/input/audios/sounds.wav",
+  "CLASSIFY_CLASSIFY_INPUT":     "sample_data/input/images/gorilla.jpg",
+  "CLASSIFY_ANIMALS_INPUT":      "sample_data/input/images/cat_side_eye.jpg",
+  "CLASSIFY_RECTANGLES_INPUT":   "sample_data/input/images/document.jpg",
+  "CLASSIFY_HORIZON_INPUT":      "sample_data/input/images/sad_pablo.png",
+  "CLASSIFY_CONTOURS_INPUT":     "sample_data/input/images/gorilla.jpg",
+  "CLASSIFY_AESTHETICS_INPUT":   "sample_data/input/images/gorilla.jpg",
+  "CLASSIFY_FEATURE_PRINT_INPUT": "sample_data/input/images/gorilla.jpg",
 
-  "EXAMPLE_TEXT_CESTLAVIE": "sample_data/input/text/cestlavie.txt",
-  "EXAMPLE_TEXT_JOKER": "sample_data/input/text/joker.txt",
-  "EXAMPLE_TEXT_MORDOR": "sample_data/input/text/mordor.txt",
-  "EXAMPLE_TEXT_SEASHELLS": "sample_data/input/text/seashells.txt",
-  "EXAMPLE_TEXT_INDECISIVE": "sample_data/input/text/indecisive.txt"
+  "COREIMAGE_AUTO_ADJUST_INPUT":          "sample_data/input/images/gorilla.jpg",
+  "COREIMAGE_AUTO_ADJUST_RACCOON_INPUT":  "sample_data/input/images/raccoon_cotton_candy.jpg",
+  "COREIMAGE_APPLY_FILTER_INPUT":         "sample_data/input/images/gorilla.jpg",
+  "COREIMAGE_APPLY_FILTER_RACCOON_INPUT": "sample_data/input/images/raccoon_cotton_candy.jpg",
+  "COREIMAGE_APPLY_FILTER_SPIDERMAN_INPUT": "sample_data/input/images/spiderman.jpg",
+  "COREIMAGE_APPLY_FILTER_SADPABLO_INPUT":  "sample_data/input/images/sad_pablo.png",
+
+  "FACE_FACE_RECTANGLES_INPUT":  "sample_data/input/images/bohemian_rhapsody.jpg",
+  "FACE_FACE_LANDMARKS_INPUT":   "sample_data/input/images/fred_yass.png",
+  "FACE_FACE_QUALITY_INPUT":     "sample_data/input/images/fred_yass.png",
+  "FACE_HUMAN_RECTANGLES_INPUT": "sample_data/input/images/spiderman.jpg",
+  "FACE_BODY_POSE_INPUT":        "sample_data/input/images/sad_pablo.png",
+  "FACE_HAND_POSE_INPUT":        "sample_data/input/images/spiderman.jpg",
+  "FACE_ANIMAL_POSE_INPUT":      "sample_data/input/images/raccoon_cotton_candy.jpg",
+
+  "NL_DETECT_LANGUAGE_INPUT":    "sample_data/input/text/cestlavie.txt",
+  "NL_TOKENIZE_WORD_INPUT":      "sample_data/input/text/joker.txt",
+  "NL_TOKENIZE_SENTENCE_INPUT":  "sample_data/input/text/mordor.txt",
+  "NL_TAG_POS_INPUT":            "sample_data/input/text/seashells.txt",
+  "NL_TAG_NER_INPUT":            "sample_data/input/text/seashells.txt",
+  "NL_TAG_LEMMA_INPUT":          "sample_data/input/text/indecisive.txt",
+  "NL_EMBED_FILE_INPUT":         "sample_data/input/text/indecisive.txt",
+
+  "OCR_PRINTED_INPUT":     "sample_data/input/images/BungeeSpice-Regular.png",
+  "OCR_HANDWRITTEN_INPUT": "sample_data/input/images/handwriting.png",
+
+  "SEGMENT_FOREGROUND_MASK_INPUT":      "sample_data/input/images/sad_pablo.png",
+  "SEGMENT_PERSON_SEGMENT_INPUT":       "sample_data/input/images/gorilla.jpg",
+  "SEGMENT_PERSON_MASK_INPUT":          "sample_data/input/images/gorilla.jpg",
+  "SEGMENT_ATTENTION_SALIENCY_INPUT":   "sample_data/input/images/gorilla.jpg",
+  "SEGMENT_OBJECTNESS_SALIENCY_INPUT":  "sample_data/input/images/gorilla.jpg",
+
+  "SHAZAM_MATCH_INPUT": "sample_data/input/audios/badly_sung_sorry.mp3",
+
+  "SNA_CLASSIFY_SPEECH_INPUT":   "sample_data/input/audios/kazoo_kid_who_are_you.wav",
+  "SNA_CLASSIFY_SOUNDS_INPUT":   "sample_data/input/audios/badly_sung_sorry.mp3",
+  "SNA_CLASSIFY_WINDOWED_INPUT": "sample_data/input/audios/kazoo_kid_who_are_you.wav",
+
+  "SYNTH_INPUT":                   "sample_data/input/audios/synth.aiff",
+
+  "SPEECH_TRANSCRIBE_INPUT":       "sample_data/input/audios/kazoo_kid_who_are_you.wav",
+  "SPEECH_VOICE_ANALYTICS_INPUT":  "sample_data/input/audios/kazoo_kid_who_are_you.wav",
+
+  "TRACK_HOMOGRAPHIC_DIR":    "sample_data/input/videos/selective_attention_test_frames",
+  "TRACK_TRANSLATIONAL_DIR":  "sample_data/input/videos/selective_attention_test_frames",
+  "TRACK_OPTICAL_FLOW_DIR":   "sample_data/input/videos/selective_attention_test_frames",
+  "TRACK_TRAJECTORIES_INPUT": "sample_data/input/videos/selective_attention_test.mp4"
 }

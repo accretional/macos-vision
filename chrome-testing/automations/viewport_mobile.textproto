@@ -1,0 +1,31 @@
+name: "viewport_mobile"
+
+steps: {
+  label: "set_viewport"
+  set_viewport: {
+    width: 390
+    height: 844
+    device_scale_factor: 3
+  }
+}
+
+steps: {
+  label: "navigate"
+  navigate: {
+    url: "https://example.com"
+  }
+}
+
+steps: {
+  label: "wait_for_render"
+  wait: {
+    milliseconds: 500
+  }
+}
+
+steps: {
+  label: "screenshot"
+  screenshot: {
+    format: "png"
+  }
+}

@@ -9,21 +9,20 @@ eval "$(python3 -c "import json,sys;root,f=sys.argv[1],sys.argv[2];[print(f'expo
 OUTPUT="$ROOT/sample_data/output/ocr"
 mkdir -p "$OUTPUT"
 
-# OCR JSON is <stem>.json in the output dir (no operation suffix).
 overlay_ocr() {
     local img="$1"
     local stem json
     stem=$(basename "$img"); stem="${stem%.*}"
-    json="$OUTPUT/${stem}.json"
+    json="$OUTPUT/${stem}_ocr.json"
     if [ ! -f "$json" ]; then
-        echo "  SKIP  overlay ($json not found)"
+        echo "  SKIP  overlay (source json not found)"
         return
     fi
     if [ ! -f "$img" ]; then
         echo "  SKIP  overlay (source image missing)"
         return
     fi
-    echo "  RUN   overlay ${stem}.svg"
+    echo "  RUN   overlay ${stem}_ocr.svg"
     "$BINARY" overlay --json "$json" --input "$img" --output "$OUTPUT"
 }
 
@@ -39,13 +38,15 @@ run() {
 
 run_ocr() {
     local label="$1" img="$2"
+    local stem
+    stem=$(basename "$img"); stem="${stem%.*}"
     run "$label" "$img" \
-        "$BINARY" ocr --input "$img" --output "$OUTPUT"
+        "$BINARY" ocr --input "$img" --output "$OUTPUT/${stem}_ocr.json"
     overlay_ocr "$img"
 }
 
 # ── printed text ──────────────────────────────────────────────────────────────
-run_ocr "ocr-printed" "$EXAMPLE_IMG_TEXT_PRINTED"
+run_ocr "ocr-printed" "$OCR_PRINTED_INPUT"
 
 # ── handwritten text ──────────────────────────────────────────────────────────
-run_ocr "ocr-handwritten" "$EXAMPLE_IMG_HANDWRITING"
+run_ocr "ocr-handwritten" "$OCR_HANDWRITTEN_INPUT"

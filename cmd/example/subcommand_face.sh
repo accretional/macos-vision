@@ -17,7 +17,7 @@ overlay_face() {
     op="${operation//-/_}"
     json="$OUTPUT/${stem}_${op}.json"
     if [ ! -f "$json" ]; then
-        echo "  SKIP  overlay ($json not found)"
+        echo "  SKIP  overlay (source json not found)"
         return
     fi
     if [ ! -f "$img" ]; then
@@ -39,50 +39,50 @@ run() {
 }
 
 # ── face-rectangles ───────────────────────────────────────────────────────────
-run "face-rectangles" "$EXAMPLE_IMG_BOHEMIAN" \
-    "$BINARY" face --input "$EXAMPLE_IMG_BOHEMIAN" \
+run "face-rectangles" "$FACE_FACE_RECTANGLES_INPUT" \
+    "$BINARY" face --input "$FACE_FACE_RECTANGLES_INPUT" \
                    --operation face-rectangles \
                    --output "$OUTPUT"
-overlay_face "$EXAMPLE_IMG_BOHEMIAN" face-rectangles
+overlay_face "$FACE_FACE_RECTANGLES_INPUT" face-rectangles
 
 # ── face-landmarks ────────────────────────────────────────────────────────────
-run "face-landmarks" "$EXAMPLE_IMG_FRED_YASS" \
-    "$BINARY" face --input "$EXAMPLE_IMG_FRED_YASS" \
+run "face-landmarks" "$FACE_FACE_LANDMARKS_INPUT" \
+    "$BINARY" face --input "$FACE_FACE_LANDMARKS_INPUT" \
                    --operation face-landmarks \
                    --output "$OUTPUT"
-overlay_face "$EXAMPLE_IMG_FRED_YASS" face-landmarks
+overlay_face "$FACE_FACE_LANDMARKS_INPUT" face-landmarks
 
 # ── face-quality ──────────────────────────────────────────────────────────────
-run "face-quality" "$EXAMPLE_IMG_FRED_YASS" \
-    "$BINARY" face --input "$EXAMPLE_IMG_FRED_YASS" \
+run "face-quality" "$FACE_FACE_QUALITY_INPUT" \
+    "$BINARY" face --input "$FACE_FACE_QUALITY_INPUT" \
                    --operation face-quality \
                    --output "$OUTPUT"
-overlay_face "$EXAMPLE_IMG_FRED_YASS" face-quality
+overlay_face "$FACE_FACE_QUALITY_INPUT" face-quality
 
 # ── human-rectangles ──────────────────────────────────────────────────────────
-run "human-rectangles" "$EXAMPLE_IMG_SPIDERMAN" \
-    "$BINARY" face --input "$EXAMPLE_IMG_SPIDERMAN" \
+run "human-rectangles" "$FACE_HUMAN_RECTANGLES_INPUT" \
+    "$BINARY" face --input "$FACE_HUMAN_RECTANGLES_INPUT" \
                    --operation human-rectangles \
                    --output "$OUTPUT"
-overlay_face "$EXAMPLE_IMG_SPIDERMAN" human-rectangles
+overlay_face "$FACE_HUMAN_RECTANGLES_INPUT" human-rectangles
 
 # ── body-pose ─────────────────────────────────────────────────────────────────
-run "body-pose" "$EXAMPLE_IMG_SAD_PABLO" \
-    "$BINARY" face --input "$EXAMPLE_IMG_SAD_PABLO" \
+run "body-pose" "$FACE_BODY_POSE_INPUT" \
+    "$BINARY" face --input "$FACE_BODY_POSE_INPUT" \
                    --operation body-pose \
                    --output "$OUTPUT"
-overlay_face "$EXAMPLE_IMG_SAD_PABLO" body-pose
+overlay_face "$FACE_BODY_POSE_INPUT" body-pose
 
 # ── hand-pose ─────────────────────────────────────────────────────────────────
-run "hand-pose" "$EXAMPLE_IMG_SPIDERMAN" \
-    "$BINARY" face --input "$EXAMPLE_IMG_SPIDERMAN" \
+run "hand-pose" "$FACE_HAND_POSE_INPUT" \
+    "$BINARY" face --input "$FACE_HAND_POSE_INPUT" \
                    --operation hand-pose \
                    --output "$OUTPUT"
-overlay_face "$EXAMPLE_IMG_SPIDERMAN" hand-pose
+overlay_face "$FACE_HAND_POSE_INPUT" hand-pose
 
 # ── animal-pose (cat_side_eye → cat_side_eye_animal_pose.json for field journal)
-run "animal-pose" "$EXAMPLE_IMG_RACCOON_COTTON_CANDY" \
-    "$BINARY" face --input "$EXAMPLE_IMG_RACCOON_COTTON_CANDY" \
+run "animal-pose" "$FACE_ANIMAL_POSE_INPUT" \
+    "$BINARY" face --input "$FACE_ANIMAL_POSE_INPUT" \
                    --operation animal-pose \
                    --output "$OUTPUT"
-overlay_face "$EXAMPLE_IMG_RACCOON_COTTON_CANDY" animal-pose
+overlay_face "$FACE_ANIMAL_POSE_INPUT" animal-pose

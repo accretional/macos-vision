@@ -15,6 +15,7 @@ let package = Package(
                 .headerSearchPath("."),
             ],
             linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-sectcreate", "-Xlinker", "__TEXT", "-Xlinker", "__info_plist", "-Xlinker", "Sources/Info.plist"]),
                 .linkedFramework("Cocoa"),
                 .linkedFramework("Vision"),
                 .linkedFramework("AVFoundation"),
@@ -25,6 +26,7 @@ let package = Package(
                 .linkedFramework("ShazamKit"),
                 .linkedFramework("NaturalLanguage"),
                 .linkedFramework("CoreML"),
+                .linkedFramework("ImageCaptureCore"),
             ]
         ),
     ]

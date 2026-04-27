@@ -11,7 +11,7 @@ pass() { echo "  PASS  $1"; PASS=$((PASS+1)); }
 fail() { echo "  FAIL  $1"; FAIL=$((FAIL+1)); }
 
 has_frames=false
-if [ -d "$FRAMES" ] && ls "$FRAMES"/*.jpg "$FRAMES"/*.png &>/dev/null 2>&1; then
+if [ -d "$FRAMES" ] && { ls "$FRAMES"/*.jpg &>/dev/null 2>&1 || ls "$FRAMES"/*.png &>/dev/null 2>&1; }; then
     has_frames=true
 fi
 
@@ -30,7 +30,7 @@ echo
 # ── homographic ───────────────────────────────────────────────────────────────
 echo "── track: homographic ───────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --input "$FRAMES" --operation homographic --output "$TMP"
+    "$BINARY" track --input "$FRAMES" --operation homographic --output "$TMP" --no-stream
     got="$TMP/track_homographic.json"
     if [ -f "$got" ]; then
         pass "homographic: output produced"
@@ -47,7 +47,7 @@ echo
 # ── translational ─────────────────────────────────────────────────────────────
 echo "── track: translational ─────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --input "$FRAMES" --operation translational --output "$TMP"
+    "$BINARY" track --input "$FRAMES" --operation translational --output "$TMP" --no-stream
     got="$TMP/track_translational.json"
     if [ -f "$got" ]; then
         pass "translational: output produced"
@@ -64,7 +64,7 @@ echo
 # ── trajectories ──────────────────────────────────────────────────────────────
 echo "── track: trajectories ──────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --input "$FRAMES" --operation trajectories --output "$TMP"
+    "$BINARY" track --input "$FRAMES" --operation trajectories --output "$TMP" --no-stream
     got="$TMP/track_trajectories.json"
     if [ -f "$got" ]; then
         pass "trajectories: output produced"

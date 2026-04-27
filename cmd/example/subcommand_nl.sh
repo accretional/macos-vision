@@ -26,40 +26,40 @@ run() {
 }
 
 # ── detect-language ───────────────────────────────────────────────────────────
-run_file "detect-language (file)" "$EXAMPLE_TEXT_CESTLAVIE" \
-    "$BINARY" nl --input "$EXAMPLE_TEXT_CESTLAVIE" \
+run_file "detect-language (file)" "$NL_DETECT_LANGUAGE_INPUT" \
+    "$BINARY" nl --input "$NL_DETECT_LANGUAGE_INPUT" \
                  --operation detect-language \
                  --topk 5 \
                  --output "$OUTPUT/cestlavie_detect_language.json"
 
 # ── tokenize ──────────────────────────────────────────────────────────────────
-run_file "tokenize (word)" "$EXAMPLE_TEXT_JOKER" \
-    "$BINARY" nl --input "$EXAMPLE_TEXT_JOKER" \
+run_file "tokenize (word)" "$NL_TOKENIZE_WORD_INPUT" \
+    "$BINARY" nl --input "$NL_TOKENIZE_WORD_INPUT" \
                  --operation tokenize \
                  --unit word \
                  --output "$OUTPUT/joker_tokenize_word.json"
 
-run_file "tokenize (sentence)" "$EXAMPLE_TEXT_MORDOR" \
-    "$BINARY" nl --input "$EXAMPLE_TEXT_MORDOR" \
+run_file "tokenize (sentence)" "$NL_TOKENIZE_SENTENCE_INPUT" \
+    "$BINARY" nl --input "$NL_TOKENIZE_SENTENCE_INPUT" \
                  --operation tokenize \
                  --unit sentence \
                  --output "$OUTPUT/mordor_tokenize_sentence.json"
 
 # ── tag ───────────────────────────────────────────────────────────────────────
-run_file "tag (pos)" "$EXAMPLE_TEXT_SEASHELLS" \
-    "$BINARY" nl --input "$EXAMPLE_TEXT_SEASHELLS" \
+run_file "tag (pos)" "$NL_TAG_POS_INPUT" \
+    "$BINARY" nl --input "$NL_TAG_POS_INPUT" \
                  --operation tag \
                  --scheme pos \
                  --output "$OUTPUT/seashells_tag_pos.json"
 
-run_file "tag (ner)" "$EXAMPLE_TEXT_SEASHELLS" \
-    "$BINARY" nl --input "$EXAMPLE_TEXT_SEASHELLS" \
+run_file "tag (ner)" "$NL_TAG_NER_INPUT" \
+    "$BINARY" nl --input "$NL_TAG_NER_INPUT" \
                  --operation tag \
                  --scheme ner \
                  --output "$OUTPUT/seashells_tag_ner.json"
 
-run_file "tag (lemma)" "$EXAMPLE_TEXT_INDECISIVE" \
-    "$BINARY" nl --input "$EXAMPLE_TEXT_INDECISIVE" \
+run_file "tag (lemma)" "$NL_TAG_LEMMA_INPUT" \
+    "$BINARY" nl --input "$NL_TAG_LEMMA_INPUT" \
                  --operation tag \
                  --scheme lemma \
                  --output "$OUTPUT/indecisive_tag_lemma.json"
@@ -89,8 +89,8 @@ run "distance" \
                  --output "$OUTPUT/cat_dog_distance.json"
 
 # ── embed (from file) ─────────────────────────────────────────────────────────
-run_file "embed (file)" "$EXAMPLE_TEXT_INDECISIVE" \
-    "$BINARY" nl --input "$EXAMPLE_TEXT_INDECISIVE" \
+run_file "embed (file)" "$NL_EMBED_FILE_INPUT" \
+    "$BINARY" nl --input "$NL_EMBED_FILE_INPUT" \
                  --operation embed \
                  --output "$OUTPUT/indecisive_embed.json"
 
