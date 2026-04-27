@@ -15,7 +15,7 @@ if [ ! -f "$img" ]; then fail "fred_yass.png not found"; echo "0 passed, 1 faile
 
 # ── setup: generate face-landmarks JSON ───────────────────────────────────────
 echo "── overlay: setup ───────────────────────────────────────────────────────────"
-"$BINARY" face --input "$img" --operation face-landmarks --output "$TMP"
+"$BINARY" face --input "$img" --operation face-landmarks --output "$TMP" --no-stream 2>/dev/null
 lm_json="$TMP/fred_yass_face_landmarks.json"
 if [ ! -f "$lm_json" ]; then
     fail "overlay: prerequisite face-landmarks JSON not produced"
@@ -26,7 +26,7 @@ echo
 
 # ── overlay subcommand ────────────────────────────────────────────────────────
 echo "── overlay: face-landmarks overlay ─────────────────────────────────────────"
-"$BINARY" overlay --json "$lm_json" --output "$TMP"
+"$BINARY" overlay --json "$lm_json" --output "$TMP" --no-stream
 lm_svg="$TMP/fred_yass_face_landmarks.svg"
 if [ -f "$lm_svg" ]; then
     pass "overlay: SVG produced"
@@ -49,13 +49,13 @@ echo
 
 # ── svg alias (backwards compat) ─────────────────────────────────────────────
 echo "── overlay: svg alias ───────────────────────────────────────────────────────"
-"$BINARY" svg --json "$lm_json" --output "$TMP"
+"$BINARY" svg --json "$lm_json" --output "$TMP" --no-stream
 [ -f "$lm_svg" ] && pass "overlay: svg alias accepted" || fail "overlay: svg alias failed"
 echo
 
 # ── --input override ─────────────────────────────────────────────────────────
 echo "── overlay: --input override ────────────────────────────────────────────────"
-"$BINARY" overlay --json "$lm_json" --input "$img" --output "$TMP"
+"$BINARY" overlay --json "$lm_json" --input "$img" --output "$TMP" --no-stream
 [ -f "$lm_svg" ] && pass "overlay: --input override accepted" || fail "overlay: --input override failed"
 echo
 
@@ -63,10 +63,10 @@ echo
 echo "── overlay: body pose bones ─────────────────────────────────────────────────"
 body_img="$IMG/sad_pablo.png"
 if [ -f "$body_img" ]; then
-    "$BINARY" face --input "$body_img" --operation body-pose --output "$TMP"
+    "$BINARY" face --input "$body_img" --operation body-pose --output "$TMP" --no-stream 2>/dev/null
     body_json="$TMP/sad_pablo_body_pose.json"
     if [ -f "$body_json" ]; then
-        "$BINARY" overlay --json "$body_json" --output "$TMP"
+        "$BINARY" overlay --json "$body_json" --output "$TMP" --no-stream
         body_svg="$TMP/sad_pablo_body_pose.svg"
         if [ -f "$body_svg" ]; then
             grep -q "layer-bones"  "$body_svg" && pass "overlay: layer-bones group present"  || fail "overlay: layer-bones missing"

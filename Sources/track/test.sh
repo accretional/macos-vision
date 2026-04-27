@@ -30,7 +30,7 @@ echo
 # ── homographic ───────────────────────────────────────────────────────────────
 echo "── track: homographic ───────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --input "$FRAMES" --operation homographic --output "$TMP"
+    "$BINARY" track --input "$FRAMES" --operation homographic --output "$TMP" --no-stream
     got="$TMP/track_homographic.json"
     if [ -f "$got" ]; then
         pass "homographic: output produced"
@@ -47,7 +47,7 @@ echo
 # ── translational ─────────────────────────────────────────────────────────────
 echo "── track: translational ─────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --input "$FRAMES" --operation translational --output "$TMP"
+    "$BINARY" track --input "$FRAMES" --operation translational --output "$TMP" --no-stream
     got="$TMP/track_translational.json"
     if [ -f "$got" ]; then
         pass "translational: output produced"
@@ -64,7 +64,7 @@ echo
 # ── trajectories ──────────────────────────────────────────────────────────────
 echo "── track: trajectories ──────────────────────────────────────────────────────"
 if $has_frames; then
-    "$BINARY" track --input "$FRAMES" --operation trajectories --output "$TMP"
+    "$BINARY" track --input "$FRAMES" --operation trajectories --output "$TMP" --no-stream
     got="$TMP/track_trajectories.json"
     if [ -f "$got" ]; then
         pass "trajectories: output produced"

@@ -43,7 +43,7 @@ echo
 
 # ── list-devices ──────────────────────────────────────────────────────────────
 echo "── imagetransfer: list-devices ───────────────────────────────────────────────"
-"$BINARY" imagetransfer --operation list-devices --output "$TMP/devices.json"
+"$BINARY" imagetransfer --operation list-devices --output "$TMP/devices.json" --no-stream
 if [ -f "$TMP/devices.json" ]; then
     pass "list-devices: output produced"
     jq empty "$TMP/devices.json" 2>/dev/null \
@@ -69,7 +69,7 @@ echo
 
 # ── list-devices --debug ──────────────────────────────────────────────────────
 echo "── imagetransfer: list-devices --debug ───────────────────────────────────────"
-"$BINARY" imagetransfer --operation list-devices --debug --output "$TMP/devices_debug.json"
+"$BINARY" imagetransfer --operation list-devices --debug --output "$TMP/devices_debug.json" --no-stream
 if [ -f "$TMP/devices_debug.json" ]; then
     pass "list-devices --debug: output produced"
     jq -e '.result.processing_ms | type == "number"' "$TMP/devices_debug.json" >/dev/null 2>&1 \
@@ -82,7 +82,7 @@ echo
 
 # ── default operation (list-devices) ─────────────────────────────────────────
 echo "── imagetransfer: default operation ──────────────────────────────────────────"
-"$BINARY" imagetransfer --output "$TMP/default.json"
+"$BINARY" imagetransfer --output "$TMP/default.json" --no-stream
 if [ -f "$TMP/default.json" ]; then
     pass "default operation: output produced"
     jq -e '.operation == "list-devices"' "$TMP/default.json" >/dev/null 2>&1 \

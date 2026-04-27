@@ -40,7 +40,7 @@ echo
 
 # ── list-labels (no input required, no auth required) ────────────────────────
 echo "── sna: list-labels ────────────────────────────────────────────────────────"
-"$BINARY" sna --operation list-labels --output "$TMP/labels.json"
+"$BINARY" sna --operation list-labels --output "$TMP/labels.json" --no-stream
 if [ -f "$TMP/labels.json" ]; then
     pass "list-labels: output produced"
     jq empty "$TMP/labels.json" 2>/dev/null && pass "list-labels: valid JSON" || fail "list-labels: invalid JSON"
@@ -62,7 +62,7 @@ echo
 # ── classify ──────────────────────────────────────────────────────────────────
 echo "── sna: classify ───────────────────────────────────────────────────────────"
 if $has_audio; then
-    "$BINARY" sna --input "$AUDIO" --operation classify --output "$TMP/classify.json"
+    "$BINARY" sna --input "$AUDIO" --operation classify --output "$TMP/classify.json" --no-stream
     if [ -f "$TMP/classify.json" ]; then
         pass "classify: output produced"
         jq empty "$TMP/classify.json" 2>/dev/null && pass "classify: valid JSON" || fail "classify: invalid JSON"
@@ -89,7 +89,7 @@ echo
 # ── classify with --topk ──────────────────────────────────────────────────────
 echo "── sna: classify --topk ────────────────────────────────────────────────────"
 if $has_audio; then
-    "$BINARY" sna --input "$AUDIO" --operation classify --topk 3 --output "$TMP/classify_k3.json"
+    "$BINARY" sna --input "$AUDIO" --operation classify --topk 3 --output "$TMP/classify_k3.json" --no-stream
     if [ -f "$TMP/classify_k3.json" ]; then
         pass "classify --topk 3: output produced"
         jq empty "$TMP/classify_k3.json" 2>/dev/null && pass "classify --topk 3: valid JSON" || fail "classify --topk 3: invalid JSON"
@@ -106,7 +106,7 @@ echo
 # ── classify with --debug ─────────────────────────────────────────────────────
 echo "── sna: classify --debug ───────────────────────────────────────────────────"
 if $has_audio; then
-    "$BINARY" sna --input "$AUDIO" --operation classify --debug --output "$TMP/classify_dbg.json"
+    "$BINARY" sna --input "$AUDIO" --operation classify --debug --output "$TMP/classify_dbg.json" --no-stream
     if [ -f "$TMP/classify_dbg.json" ]; then
         pass "classify --debug: output produced"
         jq empty "$TMP/classify_dbg.json" 2>/dev/null && pass "classify --debug: valid JSON" || fail "classify --debug: invalid JSON"
@@ -123,7 +123,7 @@ echo
 # ── detect ────────────────────────────────────────────────────────────────────
 echo "── sna: detect ─────────────────────────────────────────────────────────────"
 if $has_audio; then
-    "$BINARY" sna --input "$AUDIO" --operation detect --output "$TMP/detect.json"
+    "$BINARY" sna --input "$AUDIO" --operation detect --output "$TMP/detect.json" --no-stream
     if [ -f "$TMP/detect.json" ]; then
         pass "detect: output produced"
         jq empty "$TMP/detect.json" 2>/dev/null && pass "detect: valid JSON" || fail "detect: invalid JSON"

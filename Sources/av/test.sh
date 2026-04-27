@@ -31,7 +31,7 @@ echo
 # ── noise ─────────────────────────────────────────────────────────────────────
 echo "── av: noise ───────────────────────────────────────────────────────────────"
 if $has_audio; then
-    "$BINARY" av --input "$AUDIO" --operation noise --output "$TMP/noise.json"
+    "$BINARY" av --input "$AUDIO" --operation noise --json-output "$TMP/noise.json" --no-stream
     if [ -f "$TMP/noise.json" ]; then
         pass "noise: output produced"
         jq empty "$TMP/noise.json" 2>/dev/null && pass "noise: valid JSON" || fail "noise: invalid JSON"
@@ -54,7 +54,7 @@ echo
 # ── pitch ─────────────────────────────────────────────────────────────────────
 echo "── av: pitch ───────────────────────────────────────────────────────────────"
 if $has_audio; then
-    "$BINARY" av --input "$AUDIO" --operation pitch --output "$TMP/pitch.json"
+    "$BINARY" av --input "$AUDIO" --operation pitch --json-output "$TMP/pitch.json" --no-stream
     if [ -f "$TMP/pitch.json" ]; then
         pass "pitch: output produced"
         jq empty "$TMP/pitch.json" 2>/dev/null && pass "pitch: valid JSON" || fail "pitch: invalid JSON"

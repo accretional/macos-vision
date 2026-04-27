@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # LET_IT_RIP.sh — full validation gate before pushing or releasing
-# Runs: setup → build (debug) → all smoke tests → release build smoke check
+# Runs: setup -> build (debug) -> all smoke tests -> release build smoke check
 # Idempotent: every step it calls is idempotent.
 set -euo pipefail
 
@@ -32,4 +32,4 @@ fi
 ok "Release binary: $RELEASE_BIN"
 
 log "────────────────────────────────────────────────────────────────────────────"
-log "All checks passed. Safe to push / cut a release."
+log "All checks passed."

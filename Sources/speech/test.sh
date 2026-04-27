@@ -32,7 +32,7 @@ echo
 
 # ── list-locales ──────────────────────────────────────────────────────────────
 echo "── speech: list-locales ────────────────────────────────────────────────────"
-"$BINARY" speech --operation list-locales --output "$TMP/locales.json"
+"$BINARY" speech --operation list-locales --output "$TMP/locales.json" --no-stream
 if [ -f "$TMP/locales.json" ]; then
     pass "list-locales: output produced"
     jq empty "$TMP/locales.json" 2>/dev/null && pass "list-locales: valid JSON" || fail "list-locales: invalid JSON"
@@ -53,7 +53,7 @@ echo
 echo "── speech: transcribe ──────────────────────────────────────────────────────"
 if $has_audio; then
     set +e
-    tout=$("$BINARY" speech --input "$AUDIO" --operation transcribe --output "$TMP/transcribe.json" 2>&1)
+    tout=$("$BINARY" speech --input "$AUDIO" --operation transcribe --output "$TMP/transcribe.json" --no-stream 2>&1)
     tec=$?
     set -e
     if [ "$tec" -eq 0 ] && [ -f "$TMP/transcribe.json" ]; then
@@ -81,7 +81,7 @@ echo
 echo "── speech: voice-analytics ─────────────────────────────────────────────────"
 if $has_audio; then
     set +e
-    vout=$("$BINARY" speech --input "$AUDIO" --operation voice-analytics --output "$TMP/va.json" 2>&1)
+    vout=$("$BINARY" speech --input "$AUDIO" --operation voice-analytics --output "$TMP/va.json" --no-stream 2>&1)
     vec=$?
     set -e
     if [ "$vec" -eq 0 ] && [ -f "$TMP/va.json" ]; then

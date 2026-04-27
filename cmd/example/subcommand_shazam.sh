@@ -24,11 +24,11 @@ filename_base() { basename "$1" | sed 's/\.[^.]*$//'; }
 music_audio="$SHAZAM_MATCH_INPUT"
 MUSIC_BASE="$(filename_base "$music_audio")"
 
-# ── match (default operation, requires network) ───────────────────────────────
-run_file "match" "$music_audio" \
-    "$BINARY" shazam --input "$music_audio" \
-                     --operation match \
-                     --output "$OUTPUT/${MUSIC_BASE}_match.json"
+# # ── match (default operation, requires Apple developer identity and entitlements) ───────────────────────────────
+# run_file "match" "$music_audio" \
+#     "$BINARY" shazam --input "$music_audio" \
+#                      --operation match \
+#                      --output "$OUTPUT/${MUSIC_BASE}_match.json"
 
 # ── build (catalog from input audio directory) ────────────────────────────────
 if [ -d "$AUDIO_DIR" ]; then

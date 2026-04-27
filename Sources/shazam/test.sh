@@ -35,7 +35,7 @@ echo
 echo "── shazam: match ───────────────────────────────────────────────────────────"
 if $has_audio; then
     set +e
-    mout=$("$BINARY" shazam --input "$AUDIO" --operation match --output "$TMP/match.json" 2>&1)
+    mout=$("$BINARY" shazam --input "$AUDIO" --operation match --output "$TMP/match.json" --no-stream 2>&1)
     mec=$?
     set -e
     if [ "$mec" -eq 0 ] && [ -f "$TMP/match.json" ]; then
@@ -46,7 +46,7 @@ if $has_audio; then
         jq -e '.result.matched | type == "boolean"' "$TMP/match.json" >/dev/null 2>&1 \
             && pass "match: matched field present" || fail "match: matched field missing"
     elif echo "$mout" | grep -qiE "12|macOS|require|error"; then
-        pass "match: skipped (macOS version or network error)"
+        pass "match: skipped (requires Apple developer identity and entitlements)"
     else
         fail "match: unexpected exit ($mec): $mout"
     fi
@@ -65,7 +65,7 @@ if $has_audio; then
 
     set +e
     bout=$("$BINARY" shazam --input "$AUDIO_DIR" --operation build \
-                             --artifacts-dir "$TMP" --output "$TMP/build.json" 2>&1)
+                             --artifacts-dir "$TMP" --output "$TMP/build.json" --no-stream 2>&1)
     bec=$?
     set -e
     if [ "$bec" -eq 0 ] && [ -f "$TMP/build.json" ]; then

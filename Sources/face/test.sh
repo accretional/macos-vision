@@ -15,7 +15,7 @@ if [ ! -f "$img" ]; then fail "fred_yass.png not found"; echo "0 passed, 1 faile
 
 # ── face-rectangles ───────────────────────────────────────────────────────────
 echo "── face: face-rectangles ────────────────────────────────────────────────────"
-"$BINARY" face --input "$img" --operation face-rectangles --output "$TMP"
+"$BINARY" face --input "$img" --operation face-rectangles --output "$TMP" --no-stream 2>/dev/null
 got="$TMP/fred_yass_face_rectangles.json"
 if [ -f "$got" ]; then
     pass "face-rectangles: output produced"
@@ -30,7 +30,7 @@ echo
 
 # ── face-landmarks ────────────────────────────────────────────────────────────
 echo "── face: face-landmarks ─────────────────────────────────────────────────────"
-"$BINARY" face --input "$img" --operation face-landmarks --output "$TMP"
+"$BINARY" face --input "$img" --operation face-landmarks --output "$TMP" --no-stream 2>/dev/null
 got="$TMP/fred_yass_face_landmarks.json"
 if [ -f "$got" ]; then
     pass "face-landmarks: output produced"
@@ -44,7 +44,7 @@ echo
 
 # ── face-quality ──────────────────────────────────────────────────────────────
 echo "── face: face-quality ───────────────────────────────────────────────────────"
-"$BINARY" face --input "$img" --operation face-quality --output "$TMP"
+"$BINARY" face --input "$img" --operation face-quality --output "$TMP" --no-stream 2>/dev/null
 got="$TMP/fred_yass_face_quality.json"
 if [ -f "$got" ]; then
     pass "face-quality: output produced"
@@ -57,7 +57,7 @@ echo
 
 # ── body-pose ─────────────────────────────────────────────────────────────────
 echo "── face: body-pose ──────────────────────────────────────────────────────────"
-"$BINARY" face --input "$IMG/sad_pablo.png" --operation body-pose --output "$TMP" 2>/dev/null || true
+"$BINARY" face --input "$IMG/sad_pablo.png" --operation body-pose --output "$TMP" --no-stream 2>/dev/null || true
 got="$TMP/sad_pablo_body_pose.json"
 if [ -f "$got" ]; then
     pass "body-pose: output produced"
@@ -70,7 +70,7 @@ echo
 
 # ── human-rectangles ──────────────────────────────────────────────────────────
 echo "── face: human-rectangles ───────────────────────────────────────────────────"
-"$BINARY" face --input "$IMG/spiderman.jpg" --operation human-rectangles --output "$TMP" 2>/dev/null || true
+"$BINARY" face --input "$IMG/spiderman.jpg" --operation human-rectangles --output "$TMP" --no-stream 2>/dev/null || true
 got="$TMP/spiderman_human_rectangles.json"
 if [ -f "$got" ]; then
     pass "human-rectangles: output produced"
@@ -85,7 +85,7 @@ echo
 echo "── face: error handling ─────────────────────────────────────────────────────"
 err=$("$BINARY" face 2>&1 || true)
 echo "$err" | grep -qi "img\|input\|must be provided\|provide\|error" && pass "face: missing input error shown" || fail "face: no error on missing input"
-err=$("$BINARY" face --input "$img" --operation bad-op 2>&1 || true)
+err=$("$BINARY" face --input "$img" --operation bad-op --no-stream 2>&1 || true)
 echo "$err" | grep -qi "unknown\|supported\|error" && pass "face: unknown operation rejected" || fail "face: unknown operation not rejected"
 echo
 

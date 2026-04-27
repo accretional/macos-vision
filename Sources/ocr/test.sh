@@ -15,7 +15,7 @@ if [ ! -f "$img" ]; then fail "handwriting.png not found"; echo "0 passed, 1 fai
 
 # ── single image ──────────────────────────────────────────────────────────────
 echo "── ocr: single image ────────────────────────────────────────────────────────"
-"$BINARY" ocr --input "$img" --output "$TMP"
+"$BINARY" ocr --input "$img" --output "$TMP" --no-stream
 got="$TMP/handwriting.json"
 if [ -f "$got" ]; then
     pass "ocr: output produced"
@@ -32,7 +32,7 @@ echo
 
 # ── --lang flag ───────────────────────────────────────────────────────────────
 echo "── ocr: --lang ──────────────────────────────────────────────────────────────"
-lang_out=$("$BINARY" ocr --lang 2>&1)
+lang_out=$("$BINARY" ocr --lang --no-stream 2>&1)
 echo "$lang_out" | grep -q "^Supported recognition languages:" && pass "--lang: header present" || fail "--lang: header missing"
 lang_count=$(echo "$lang_out" | grep -c "^- " || true)
 [ "${lang_count:-0}" -gt 0 ] && pass "--lang: $lang_count languages listed" || fail "--lang: no languages listed"
