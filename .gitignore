@@ -12,6 +12,5 @@ playground
 Package.resolved
 sample_data/output/
 temp*/
-docs/adding-subcommands/*
 chrome-testing/screenshots/*.png
 chrome-testing/go.sum

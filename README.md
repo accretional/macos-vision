@@ -24,7 +24,7 @@ Full flag and operation tables: **[docs/cli-reference.md](docs/cli-reference.md)
 | `overlay` | Render subcommand JSON as SVG overlay | _(no operations)_ |
 | `debug` | Inspect image file properties (dimensions, DPI, EXIF) | _(no operations)_ |
 
-> **Note — `shazam match`:** The `match` operation require an Apple Developer account and entitlements (`com.apple.developer.shazam-api`). This has not been tested end-to-end yet.
+> **Note — `shazam match`:** The `match` operation require an Apple Developer account and entitlements (`com.apple.developer.shazam-api`). This has not been tested yet.
 
 ## Build and install
 
