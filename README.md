@@ -26,6 +26,13 @@ Full flag and operation tables: **[docs/cli-reference.md](docs/cli-reference.md)
 
 > **Note — `shazam match`:** The `match` operation require an Apple Developer account and entitlements (`com.apple.developer.shazam-api`). This has not been tested yet.
 
+## gRPC service
+
+A gRPC front end for local, on-device inference lives under
+**[`grpc/`](grpc/README.md)** (`macosvision.VisionService`): OCR, image
+embeddings (feature print), classification, animal detection, and face
+detection, with server reflection enabled.
+
 ## Build and install
 
 ```bash

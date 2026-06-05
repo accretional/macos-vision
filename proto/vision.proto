@@ -1,0 +1,190 @@
+syntax = "proto3";
+
+// macosvision wraps the local, on-device Apple Vision capabilities exposed by
+// the `macos-vision` CLI as a gRPC service for local inference. Every RPC runs
+// entirely on-device (no network, no cloud) by shelling out to the signed
+// `macos-vision` binary and parsing its JSON envelope.
+package macosvision;
+
+option go_package = "github.com/accretional/macos-vision/grpc/gen/macosvisionpb;macosvisionpb";
+
+// VisionService exposes one RPC per image-inference capability the underlying
+// `macos-vision` CLI actually supports today. All coordinates are normalized to
+// the [0,1] range with the origin at the TOP-LEFT of the image (the CLI already
+// flips Vision's bottom-left origin convention before emitting JSON).
+service VisionService {
+  // RecognizeText runs accurate on-device OCR (Vision VNRecognizeTextRequest).
+  rpc RecognizeText(RecognizeTextRequest) returns (RecognizeTextResponse);
+
+  // ComputeImageFeaturePrint returns a dense perceptual embedding vector for an
+  // image (Vision VNGenerateImageFeaturePrintRequest). This is the first-class
+  // local image-embedding RPC for similarity search and retrieval.
+  rpc ComputeImageFeaturePrint(ComputeImageFeaturePrintRequest)
+      returns (ComputeImageFeaturePrintResponse);
+
+  // ClassifyImage returns scene/object classification labels with confidences
+  // (Vision VNClassifyImageRequest).
+  rpc ClassifyImage(ClassifyImageRequest) returns (ClassifyImageResponse);
+
+  // RecognizeAnimals detects animals with bounding boxes and per-detection
+  // labels (Vision VNRecognizeAnimalsRequest).
+  rpc RecognizeAnimals(RecognizeAnimalsRequest) returns (RecognizeAnimalsResponse);
+
+  // DetectFaces returns bounding boxes for detected faces
+  // (Vision VNDetectFaceRectanglesRequest).
+  rpc DetectFaces(DetectFacesRequest) returns (DetectFacesResponse);
+
+  // GetCapabilities lists the inference capabilities this server exposes,
+  // useful for discovery via the KVQ Dispatcher / TypeRegistry.
+  rpc GetCapabilities(GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+}
+
+// ── shared types ─────────────────────────────────────────────────────────────
+
+// Image carries the input either as raw encoded bytes (PNG/JPEG/TIFF/etc.) or
+// as a path on the server's local filesystem. Exactly one must be set; if both
+// are set, image_bytes wins.
+message Image {
+  // Raw encoded image bytes (PNG, JPEG, TIFF, BMP, GIF, HEIC, ...). The server
+  // writes these to a temp file before invoking the CLI.
+  bytes image_bytes = 1;
+  // Path to an image file already on the server's local filesystem.
+  string path = 2;
+}
+
+// ImageInfo echoes basic properties of the decoded source image.
+message ImageInfo {
+  string filename = 1;
+  string filepath = 2;
+  int32 width = 3;
+  int32 height = 4;
+}
+
+// Point is a normalized [0,1] coordinate, origin top-left.
+message Point {
+  double x = 1;
+  double y = 2;
+}
+
+// BoundingBox is a normalized [0,1] rectangle, origin top-left.
+message BoundingBox {
+  double x = 1;
+  double y = 2;
+  double width = 3;
+  double height = 4;
+}
+
+// Quad is a (possibly rotated) four-corner region, normalized, origin top-left.
+message Quad {
+  Point top_left = 1;
+  Point top_right = 2;
+  Point bottom_right = 3;
+  Point bottom_left = 4;
+}
+
+// Label is a classification identifier with its confidence in [0,1].
+message Label {
+  string identifier = 1;
+  float confidence = 2;
+}
+
+// ── RecognizeText (OCR) ──────────────────────────────────────────────────────
+
+message RecognizeTextRequest {
+  Image image = 1;
+  // Recognition languages, e.g. ["en-US", "fr-FR"]. Empty = all supported.
+  repeated string recognition_languages = 2;
+}
+
+message TextObservation {
+  string text = 1;
+  float confidence = 2;
+  Quad quad = 3;
+}
+
+message RecognizeTextResponse {
+  ImageInfo info = 1;
+  repeated TextObservation observations = 2;
+  // All recognized lines joined with "\n", in reading order.
+  string text = 3;
+}
+
+// ── ComputeImageFeaturePrint (image embeddings) ──────────────────────────────
+
+message ComputeImageFeaturePrintRequest {
+  Image image = 1;
+}
+
+message ComputeImageFeaturePrintResponse {
+  ImageInfo info = 1;
+  // The embedding vector. Decoded from the CLI's base64 raw element buffer.
+  repeated float vector = 2 [packed = true];
+  // Number of elements in the vector (== vector.size()).
+  int32 dimensions = 3;
+  // Source element type reported by Vision: "float" or "double".
+  string element_type = 4;
+}
+
+// ── ClassifyImage ────────────────────────────────────────────────────────────
+
+message ClassifyImageRequest {
+  Image image = 1;
+}
+
+message ClassifyImageResponse {
+  ImageInfo info = 1;
+  // Labels sorted by descending confidence (CLI filters to confidence >= 0.05).
+  repeated Label classifications = 2;
+}
+
+// ── RecognizeAnimals ─────────────────────────────────────────────────────────
+
+message RecognizeAnimalsRequest {
+  Image image = 1;
+}
+
+message AnimalObservation {
+  BoundingBox bounding_box = 1;
+  float confidence = 2;
+  repeated Label labels = 3;
+}
+
+message RecognizeAnimalsResponse {
+  ImageInfo info = 1;
+  repeated AnimalObservation animals = 2;
+}
+
+// ── DetectFaces ──────────────────────────────────────────────────────────────
+
+message DetectFacesRequest {
+  Image image = 1;
+}
+
+message FaceObservation {
+  BoundingBox bounding_box = 1;
+  float confidence = 2;
+}
+
+message DetectFacesResponse {
+  ImageInfo info = 1;
+  repeated FaceObservation faces = 2;
+}
+
+// ── GetCapabilities ──────────────────────────────────────────────────────────
+
+message GetCapabilitiesRequest {}
+
+message Capability {
+  // The gRPC method name, e.g. "RecognizeText".
+  string rpc = 1;
+  // The underlying CLI subcommand + operation, e.g. "classify feature-print".
+  string cli_invocation = 2;
+  // Human-readable description.
+  string description = 3;
+}
+
+message GetCapabilitiesResponse {
+  // The resolved path to the macos-vision CLI binary backing this server.
+  string cli_path = 1;
+  repeated Capability capabilities = 2;
+}
