@@ -1569,21 +1569,41 @@ static NSString *MAVFrequencyToNote(float freq) {
     }
 
     if (self.text.length) {
-        // Bottom-center, good for title burns and timecodes
+        // CATextLayer does not render through AVVideoCompositionCoreAnimationTool when
+        // an ancestor has geometryFlipped = YES — its Core Text rendering never fires
+        // into the composition pipeline.  Pre-render the text to a CGImage (same path
+        // the image overlay uses) and assign it to a plain CALayer.contents instead.
         CGFloat fontSize = MAX(24.0, renderSize.height * 0.04);
-        CGFloat textH = fontSize * 1.8;
+        CGFloat textH = ceil(fontSize * 1.8);
         CGFloat padding = renderSize.height * 0.04;
-        CATextLayer *tl = [CATextLayer layer];
-        tl.string = self.text;
-        tl.font = (__bridge CFTypeRef)([NSFont boldSystemFontOfSize:fontSize]);
-        tl.fontSize = fontSize;
-        tl.foregroundColor = [NSColor whiteColor].CGColor;
-        tl.shadowOpacity = 0.9f;
-        tl.shadowRadius = 3.0f;
-        tl.shadowOffset = CGSizeMake(1, -1);
-        tl.alignmentMode = kCAAlignmentCenter;
-        tl.frame = CGRectMake(0, padding, renderSize.width, textH);
-        [parentLayer addSublayer:tl];
+        NSString *capturedText = self.text;
+        NSSize textSize = NSMakeSize(renderSize.width, textH);
+
+        NSImage *textImg = [NSImage imageWithSize:textSize flipped:YES
+                                   drawingHandler:^BOOL(NSRect r) {
+            NSShadow *shad = [NSShadow new];
+            shad.shadowColor     = [NSColor colorWithWhite:0 alpha:0.9];
+            shad.shadowBlurRadius = 3.0;
+            shad.shadowOffset    = NSMakeSize(1, -1);
+            NSDictionary *attrs = @{
+                NSFontAttributeName:            [NSFont boldSystemFontOfSize:fontSize],
+                NSForegroundColorAttributeName: [NSColor whiteColor],
+                NSShadowAttributeName:          shad,
+            };
+            NSAttributedString *as = [[NSAttributedString alloc]
+                initWithString:capturedText attributes:attrs];
+            NSSize sz = as.size;
+            [as drawAtPoint:NSMakePoint(floor((textSize.width - sz.width) / 2.0),
+                                        floor((textH    - sz.height)   / 2.0))];
+            return YES;
+        }];
+
+        CALayer *textLayer = [CALayer layer];
+        textLayer.frame    = CGRectMake(0, padding, renderSize.width, textH);
+        textLayer.contents = (__bridge id)([textImg CGImageForProposedRect:NULL
+                                                                   context:nil
+                                                                     hints:nil]);
+        [parentLayer addSublayer:textLayer];
     }
 
     // Video composition
@@ -1609,7 +1629,21 @@ static NSString *MAVFrequencyToNote(float freq) {
     NSURL *outURL = [NSURL fileURLWithPath:self.mediaOutput];
     [[NSFileManager defaultManager] removeItemAtURL:outURL error:nil];
 
-    NSString *presetConst = MPresetConstant(self.preset ?: @"high") ?: AVAssetExportPresetHighestQuality;
+    // Quality-based presets (low/medium/high) act as a passthrough remux for many
+    // already-encoded assets and silently ignore videoComposition, so the animation
+    // tool overlay is never applied.  Use a dimension-based preset by default; these
+    // always force a re-encode and correctly honour the CALayer overlay.
+    NSString *presetConst;
+    if (self.preset) {
+        presetConst = MPresetConstant(self.preset) ?: AVAssetExportPreset1920x1080;
+    } else {
+        CGFloat maxDim = MAX(renderSize.width, renderSize.height);
+        if (maxDim <= 480)       presetConst = AVAssetExportPreset640x480;
+        else if (maxDim <= 540)  presetConst = AVAssetExportPreset960x540;
+        else if (maxDim <= 720)  presetConst = AVAssetExportPreset1280x720;
+        else if (maxDim <= 1080) presetConst = AVAssetExportPreset1920x1080;
+        else                     presetConst = AVAssetExportPreset3840x2160;
+    }
     AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:asset presetName:presetConst];
     if (!session) {
         if (error) *error = [NSError errorWithDomain:MediaErrorDomain code:AVProcessorErrorSessionCreate
