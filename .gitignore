@@ -6,6 +6,8 @@ playground
 .idea
 .DS_Store
 .eslintcache
+__pycache__/
+*.pyc
 .build
 .claude
 .vscode

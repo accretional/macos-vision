@@ -14,6 +14,8 @@
 #import "sna/main.h"
 #import "coreimage/main.h"
 #import "imagetransfer/main.h"
+#import "input/main.h"
+#import "window/main.h"
 
 static void printUsage(void) {
     printf(
@@ -37,6 +39,8 @@ static void printUsage(void) {
         "  sna            Classify sounds and environmental audio\n"
         "  coreimage      Apply image filters and analyse visual properties\n"
         "  imagetransfer  Import and manage files on connected cameras and scanners\n"
+        "  input          Synthesise mouse and keyboard input events\n"
+        "  window         Inspect displays and reposition the focused window\n"
     );
 }
 
@@ -83,6 +87,8 @@ int main(int argc, const char * argv[]) {
         else if ([subcommand isEqualToString:@"sna"])          success = MVDispatchSNA(args, &error);
         else if ([subcommand isEqualToString:@"coreimage"])    success = MVDispatchCoreImage(args, &error);
         else if ([subcommand isEqualToString:@"imagetransfer"]) success = MVDispatchImageTransfer(args, &error);
+        else if ([subcommand isEqualToString:@"input"])        success = MVDispatchInput(args, &error);
+        else if ([subcommand isEqualToString:@"window"])       success = MVDispatchWindow(args, &error);
         else {
             fprintf(stderr, "Error: unknown subcommand '%s'\n", subcommand.UTF8String);
             printUsage();
